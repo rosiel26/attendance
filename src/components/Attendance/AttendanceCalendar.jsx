@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { useAuthStore } from "../../stores/authStore";
+import { supabase } from "../../config/supabase";
 import {
   getLocalDateString,
   getAttendanceStorageKey,
@@ -33,12 +34,6 @@ const AttendanceCalendar = () => {
   const [attendanceData, setAttendanceData] = useState({});
   const [correctionsData, setCorrectionsData] = useState([]);
   const [holidays, setHolidays] = useState([]);
-  const [correctionModalOpen, setCorrectionModalOpen] = useState(false);
-  const [selectedDayForCorrection, setSelectedDayForCorrection] =
-    useState(null);
-  const [correctionReason, setCorrectionReason] =
-    useState("Forgot to time out");
-  const [correctOutTime, setCorrectOutTime] = useState("");
 
   const monthName = currentMonth.toLocaleDateString("en-US", {
     month: "long",
@@ -244,21 +239,31 @@ const AttendanceCalendar = () => {
       attendance &&
       (attendance.checkInTime || attendance.checkOutTime)
     ) {
-      const checkInFormatted = formatTime(attendance.checkInTime);
-      const checkOutFormatted = formatTime(attendance.checkOutTime);
-      const hoursWorked = calculateHoursWorked(
-        attendance.checkInTime,
-        attendance.checkOutTime,
-      );
-
       // Check if this is an incomplete record (check-in but no check-out)
-      const isIncomplete = attendance.checkInTime && !attendance.checkOutTime;
+      let correctedCheckInTime = attendance.checkInTime;
+      let correctedCheckOutTime = attendance.checkOutTime;
+      if (approvedCorrection) {
+        if (approvedCorrection.missing_type === "check_in") {
+          correctedCheckInTime = new Date(
+            `${dayDate.toISOString().split("T")[0]}T${approvedCorrection.requested_time}`,
+          );
+        }
+        if (approvedCorrection.missing_type === "check_out") {
+          correctedCheckOutTime = new Date(
+            `${dayDate.toISOString().split("T")[0]}T${approvedCorrection.requested_time}`,
+          );
+        }
+      }
+      const checkInFormatted = formatTime(correctedCheckInTime);
+      const checkOutFormatted = formatTime(correctedCheckOutTime);
+      const hoursWorked = calculateHoursWorked(
+        correctedCheckInTime,
+        correctedCheckOutTime,
+      );
+      const isIncomplete = correctedCheckInTime && !correctedCheckOutTime;
 
       content = (
-        <div
-          className={`flex flex-col items-center text-center ${isIncomplete ? "cursor-pointer hover:bg-gray-100 rounded-lg p-1" : ""}`}
-          onClick={() => isIncomplete && handleDayClick(day)}
-        >
+        <div className="flex flex-col items-center text-center">
           <span className="text-lg font-bold">{day}</span>
           <div className="text-[0.6rem] mt-0.5 leading-tight">
             {checkInFormatted && <div>in-{checkInFormatted}</div>}
@@ -275,8 +280,6 @@ const AttendanceCalendar = () => {
             {isIncomplete && (
               <div className="text-[0.5rem] mt-1 text-orange-600 font-medium leading-tight">
                 Status: INCOMPLETE
-                <br />
-                Click to request correction
               </div>
             )}
             {approvedCorrection && (
@@ -377,79 +380,6 @@ const AttendanceCalendar = () => {
     return `${displayHours}${minutes > 0 ? `:${minutes.toString().padStart(2, "0")}` : ""}${ampm}`;
   };
 
-  const handleDayClick = (day) => {
-    if (!day) return;
-
-    const attendance = attendanceData[day];
-    const isIncomplete =
-      attendance && attendance.checkInTime && !attendance.checkOutTime;
-
-    if (isIncomplete) {
-      setSelectedDayForCorrection(day);
-      setCorrectionModalOpen(true);
-    }
-  };
-
-  const handleSubmitCorrection = async () => {
-    if (
-      !selectedDayForCorrection ||
-      !correctionReason.trim() ||
-      !correctOutTime.trim()
-    ) {
-      toast.error("Please fill in all fields");
-      return;
-    }
-
-    try {
-      const dayDate = new Date(
-        currentMonth.getFullYear(),
-        currentMonth.getMonth(),
-        selectedDayForCorrection,
-      );
-
-      // Format the requested time as HH:MM format
-      const requestedTime = correctOutTime; // Already in HH:MM format from time input
-
-      const attendance = attendanceData[selectedDayForCorrection];
-      const correctionData = {
-        userId: user.id,
-        attendanceDate: dayDate.toISOString().split("T")[0], // YYYY-MM-DD format
-        missingType: "check_out",
-        requestedTime: requestedTime,
-        reason: correctionReason,
-        attendanceId: attendance?.id,
-      };
-
-      const result = await requestAttendanceCorrection(correctionData);
-
-      if (result.error) {
-        throw result.error;
-      }
-
-      const formattedDate = dayDate.toLocaleDateString("en-US", {
-        month: "long",
-        day: "numeric",
-        year: "numeric",
-      });
-
-      toast.success(`Correction request submitted for ${formattedDate}`);
-
-      // Reload attendance data to reflect any immediate changes
-      await loadAttendanceData();
-
-      // Close modal and reset
-      setCorrectionModalOpen(false);
-      setSelectedDayForCorrection(null);
-      setCorrectionReason("Forgot to time out");
-      setCorrectOutTime("");
-    } catch (error) {
-      console.error("Error submitting correction request:", error);
-      toast.error(
-        `Failed to submit correction request: ${error.message || "Please try again."}`,
-      );
-    }
-  };
-
   const handleCloseCorrectionModal = () => {
     setCorrectionModalOpen(false);
     setSelectedDayForCorrection(null);
@@ -526,7 +456,6 @@ const AttendanceCalendar = () => {
                 key={idx}
                 className={getDayClassName(day)}
                 title={tooltipText}
-                onClick={() => handleDayClick(day)}
               >
                 {getDayContent(day)}
               </div>
@@ -569,58 +498,6 @@ const AttendanceCalendar = () => {
           </div>
         </div>
       </div>
-
-      <Dialog
-        open={correctionModalOpen}
-        onClose={handleCloseCorrectionModal}
-        maxWidth="sm"
-        fullWidth
-      >
-        <DialogTitle>
-          Request Attendance Correction for{" "}
-          {selectedDayForCorrection
-            ? `${currentMonth.toLocaleDateString("en-US", {
-                month: "long",
-                day: "numeric",
-                year: "numeric",
-              })}`
-            : ""}
-        </DialogTitle>
-        <DialogContent>
-          <div className="space-y-4 mt-4">
-            <TextField
-              fullWidth
-              label="Reason for Correction"
-              value={correctionReason}
-              onChange={(e) => setCorrectionReason(e.target.value)}
-              placeholder="e.g., Forgot to time out"
-              helperText="Please provide a reason for the correction request"
-            />
-            <TextField
-              fullWidth
-              label="Correct Check-out Time"
-              type="time"
-              value={correctOutTime}
-              onChange={(e) => setCorrectOutTime(e.target.value)}
-              InputLabelProps={{ shrink: true }}
-              inputProps={{ step: 300 }} // 5 min steps
-              helperText="Enter the time you actually checked out"
-            />
-          </div>
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={handleCloseCorrectionModal} color="secondary">
-            Cancel
-          </Button>
-          <Button
-            onClick={handleSubmitCorrection}
-            color="primary"
-            variant="contained"
-          >
-            Submit Correction Request
-          </Button>
-        </DialogActions>
-      </Dialog>
     </div>
   );
 };

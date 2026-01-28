@@ -4,4 +4,3 @@ dist/
 *.log
 .env.local
 .vscode/
-src/config/supabase.js

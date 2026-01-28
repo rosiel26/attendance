@@ -5,10 +5,12 @@ import CheckInOut from "../Attendance/CheckInOut";
 import AttendanceCalendar from "../Attendance/AttendanceCalendar";
 import LeaveRequest from "../Leave/LeaveRequest";
 import LeaveHistory from "../Leave/LeaveHistory";
+import AttendanceCorrection from "../Attendance/AttendanceCorrection";
 import AccessTimeIcon from "@mui/icons-material/AccessTime";
 import CalendarTodayIcon from "@mui/icons-material/CalendarToday";
 import EditNoteIcon from "@mui/icons-material/EditNote";
 import HistoryIcon from "@mui/icons-material/History";
+import BuildIcon from "@mui/icons-material/Build";
 
 const EmployeeDashboard = () => {
   const [activeTab, setActiveTab] = useState(() => {
@@ -36,6 +38,7 @@ const EmployeeDashboard = () => {
     },
     { id: "leave-request", label: "Request Leave", icon: <EditNoteIcon /> },
     { id: "leave-history", label: "Leave History", icon: <HistoryIcon /> },
+    { id: "corrections", label: "Attendance Corrections", icon: <BuildIcon /> },
   ];
 
   const renderContent = () => {
@@ -48,6 +51,8 @@ const EmployeeDashboard = () => {
         return <LeaveRequest />;
       case "leave-history":
         return <LeaveHistory />;
+      case "corrections":
+        return <AttendanceCorrection />;
       default:
         return <CheckInOut />;
     }

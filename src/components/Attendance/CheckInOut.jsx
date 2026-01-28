@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+  import React, { useEffect, useState } from "react";
 import { useAuthStore } from "../../stores/authStore";
 import toast from "react-hot-toast";
 import {
@@ -67,7 +67,7 @@ const CheckInOut = () => {
       toast.success("✓ Checked in successfully!");
     } catch (error) {
       console.error("Check-in error:", error);
-      toast.error("✗ Check-in failed: " + error.message);
+      toast.error(error.message);
     } finally {
       setLoading(false);
     }
@@ -88,7 +88,7 @@ const CheckInOut = () => {
       toast.success("✓ Checked out successfully!");
     } catch (error) {
       console.error("Check-out error:", error);
-      toast.error("✗ Check-out failed: " + error.message);
+      toast.error(error.message);
     } finally {
       setLoading(false);
     }

@@ -129,9 +129,24 @@ export const getAttendanceRecords = async (userId, startDate, endDate) => {
 
 export const getTeamAttendance = async (managerId, startDate, endDate) => {
   try {
+    // First get team members
+    const { data: teamMembers, error: teamError } = await supabase
+      .from('users')
+      .select('id')
+      .eq('manager_id', managerId);
+
+    if (teamError) throw teamError;
+
+    if (!teamMembers || teamMembers.length === 0) {
+      return { data: [], error: null };
+    }
+
+    const teamIds = teamMembers.map(m => m.id);
+
     return await supabase
       .from('attendance')
       .select('*, users(id, full_name, email)')
+      .in('user_id', teamIds)
       .gte('check_in_time', startDate.toISOString())
       .lte('check_in_time', endDate.toISOString())
       .order('check_in_time', { ascending: false });
@@ -655,7 +670,7 @@ export const approveAttendanceCorrection = async (correctionId, approverUserId, 
     // Get correction details first
     const { data: correction, error: fetchError } = await supabase
       .from('attendance_corrections')
-      .select('user_id, attendance_id, missing_type, requested_time')
+      .select('user_id, attendance_id, missing_type, requested_time, attendance_date')
       .eq('id', correctionId)
       .single();
 
@@ -669,11 +684,26 @@ export const approveAttendanceCorrection = async (correctionId, approverUserId, 
         approved_by: approverUserId,
         approved_at: new Date().toISOString(),
         remarks,
+        applied: true,
         updated_at: new Date().toISOString(),
       })
       .eq('id', correctionId);
 
     if (updateResult.error) throw updateResult.error;
+
+    // Find attendance_id if not set
+    if (!correction.attendance_id) {
+      const { data: attendance } = await supabase
+        .from('attendance')
+        .select('id')
+        .eq('user_id', correction.user_id)
+        .gte('check_in_time', `${correction.attendance_date}T00:00:00`)
+        .lt('check_in_time', `${correction.attendance_date}T23:59:59`)
+        .single();
+      if (attendance) {
+        correction.attendance_id = attendance.id;
+      }
+    }
 
     // Update the attendance record
     if (correction.attendance_id && correction.missing_type && correction.requested_time) {
@@ -702,7 +732,7 @@ export const approveAttendanceCorrection = async (correctionId, approverUserId, 
 
         if (attendanceRecord?.check_in_time) {
           const checkInTime = new Date(attendanceRecord.check_in_time);
-          const checkOutTime = new Date(correction.requested_time);
+          const checkOutTime = new Date(timestamp);
           const durationMinutes = (checkOutTime - checkInTime) / (1000 * 60);
           const durationHours = durationMinutes / 60;
           let workDurationHours = durationHours;
@@ -714,10 +744,13 @@ export const approveAttendanceCorrection = async (correctionId, approverUserId, 
       }
 
       if (Object.keys(attendanceUpdate).length > 0) {
-        await supabase
+        console.log('Updating attendance record:', attendanceUpdate);
+        const attendanceResult = await supabase
           .from('attendance')
           .update(attendanceUpdate)
           .eq('id', correction.attendance_id);
+        console.log('Attendance update result:', attendanceResult);
+        if (attendanceResult.error) throw attendanceResult.error;
       }
     }
 
