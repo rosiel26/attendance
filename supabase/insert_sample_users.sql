@@ -1,0 +1,8 @@
+-- Insert sample users data
+INSERT INTO users (id, organization_id, email, full_name, role, department_id, phone, avatar_url, created_at, updated_at, manager_id, role_new, is_super_admin) VALUES
+('3667e402-bfe0-4f05-8735-ed3463894eed', 'c2ca6b8d-525f-418f-aba3-286b853c4df9', 'romen.arcamo@gmail.com', 'Rosiel', 'admin', null, null, null, '2026-01-26 00:18:36.482947', '2026-01-26 00:18:36.482947', null, 'admin', false),
+('df844f35-7011-460a-88f3-f3053a23f8a7', '67ed27f2-cd10-4d99-a4a8-947bd6410c52', 'em3@gmail.com', 'emp3', 'employee', null, null, null, '2026-01-28 08:51:15.656127', '2026-01-28 08:51:15.656127', null, null, false),
+('cb97b2b0-b8e1-412e-8af7-ccce06a38123', null, 'manager2@gmail.com', 'manager2', 'manager', null, null, null, '2026-01-27 05:03:55.328662', '2026-01-27 05:03:55.328662', null, 'manager', false),
+('7f4304d3-bc12-4827-860a-f96866331e7c', null, 'irisluna424@gmail.com', 'managerIris', 'manager', null, null, null, '2026-01-26 00:41:33.149974', '2026-01-26 00:41:33.149974', null, 'manager', false),
+('1836bd18-ed7f-4a51-a65b-1c4397806f20', null, 'em@gmail.com', 'employee', 'employee', null, null, null, '2026-01-26 01:00:46.101099', '2026-01-26 01:00:46.101099', '7f4304d3-bc12-4827-860a-f96866331e7c', 'employee', false),
+('71e4cd12-ee47-47f1-8f2b-73dc7c0fc144', '67ed27f2-cd10-4d99-a4a8-947bd6410c52', 'em2@gmail.com', 'employee2', 'employee', null, null, null, '2026-01-26 05:03:58.889124', '2026-01-26 05:03:58.889124', '7f4304d3-bc12-4827-860a-f96866331e7c', 'employee', false);

@@ -14,6 +14,10 @@ const Notifications = ({ onNavigate }) => {
   const [notifications, setNotifications] = useState([]);
   const [isOpen, setIsOpen] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [dismissedNotifications, setDismissedNotifications] = useState(() => {
+    const saved = localStorage.getItem("dismissedNotifications");
+    return saved ? new Set(JSON.parse(saved)) : new Set();
+  });
 
   useEffect(() => {
     if (user?.id) {
@@ -30,6 +34,12 @@ const Notifications = ({ onNavigate }) => {
   }, [user]);
 
   const setupRealtimeSubscription = () => {
+    // Only setup subscription if user is available
+    if (!user?.id) {
+      console.warn("User not available, skipping notification subscription");
+      return;
+    }
+
     // Only setup subscription if notifications table exists
     supabase
       .from("notifications")
@@ -50,8 +60,18 @@ const Notifications = ({ onNavigate }) => {
               },
               (payload) => {
                 console.log("New notification received:", payload);
-                // Add the new notification to the list
-                setNotifications((prev) => [payload.new, ...prev]);
+                // Add the new notification to the list, avoiding duplicates
+                setNotifications((prev) => {
+                  // Check if this notification already exists
+                  const exists = prev.some((n) => n.id === payload.new.id);
+                  if (exists) {
+                    console.log(
+                      "Notification already exists, skipping duplicate",
+                    );
+                    return prev;
+                  }
+                  return [payload.new, ...prev];
+                });
               },
             )
             .subscribe();
@@ -64,11 +84,26 @@ const Notifications = ({ onNavigate }) => {
   };
 
   const loadNotifications = async () => {
+    if (!user?.id) {
+      console.warn("User not available, skipping notification load");
+      setNotifications([]);
+      return;
+    }
+
     try {
       const result = await getUserNotifications(user.id);
       // getUserNotifications now returns { data, error } or just data array
       const notifications = result.data || result || [];
-      setNotifications(notifications);
+
+      // Remove any potential duplicates based on notification ID
+      const uniqueNotifications = notifications.reduce((acc, curr) => {
+        if (!acc.some((n) => n.id === curr.id)) {
+          acc.push(curr);
+        }
+        return acc;
+      }, []);
+
+      setNotifications(uniqueNotifications);
     } catch (error) {
       console.error("Error loading notifications:", error);
       setNotifications([]); // Fallback to empty array
@@ -114,7 +149,7 @@ const Notifications = ({ onNavigate }) => {
 
     // Navigate based on notification type
     if (onNavigate) {
-      if (notification.type === 'leave') {
+      if (notification.type === "leave") {
         // For managers: go to leave requests
         // For employees: go to leave history
         // We'll determine this in the parent component
@@ -126,7 +161,22 @@ const Notifications = ({ onNavigate }) => {
     setIsOpen(false);
   };
 
-  const unreadCount = notifications.filter((n) => !n.is_read).length;
+  const handleDismiss = (id) => {
+    setDismissedNotifications((prev) => {
+      const newSet = new Set([...prev, id]);
+      localStorage.setItem(
+        "dismissedNotifications",
+        JSON.stringify([...newSet]),
+      );
+      return newSet;
+    });
+  };
+
+  const visibleNotifications = notifications.filter(
+    (n) => !dismissedNotifications.has(n.id),
+  );
+
+  const unreadCount = visibleNotifications.filter((n) => !n.is_read).length;
 
   const getNotificationIcon = (type) => {
     switch (type) {
@@ -195,15 +245,35 @@ const Notifications = ({ onNavigate }) => {
               <h3 className="text-lg font-semibold text-gray-900">
                 Notifications
               </h3>
-              {unreadCount > 0 && (
-                <button
-                  onClick={handleMarkAllAsRead}
-                  disabled={loading}
-                  className="text-sm text-blue-600 hover:text-blue-800 disabled:opacity-50"
-                >
-                  Mark all read
-                </button>
-              )}
+              <div className="flex items-center gap-2">
+                {unreadCount > 0 && (
+                  <button
+                    onClick={handleMarkAllAsRead}
+                    disabled={loading}
+                    className="text-sm text-blue-600 hover:text-blue-800 disabled:opacity-50"
+                  >
+                    Mark all read
+                  </button>
+                )}
+                {visibleNotifications.length > 0 && (
+                  <button
+                    onClick={() => {
+                      const allIds = visibleNotifications.map((n) => n.id);
+                      setDismissedNotifications((prev) => {
+                        const newSet = new Set([...prev, ...allIds]);
+                        localStorage.setItem(
+                          "dismissedNotifications",
+                          JSON.stringify([...newSet]),
+                        );
+                        return newSet;
+                      });
+                    }}
+                    className="text-sm text-gray-600 hover:text-gray-800"
+                  >
+                    Clear all
+                  </button>
+                )}
+              </div>
             </div>
           </div>
 
@@ -213,7 +283,7 @@ const Notifications = ({ onNavigate }) => {
                 No notifications yet
               </div>
             ) : (
-              notifications.map((notification) => (
+              visibleNotifications.map((notification) => (
                 <div
                   key={notification.id}
                   className={`p-4 border-b border-gray-100 hover:bg-gray-50 cursor-pointer ${
@@ -223,22 +293,47 @@ const Notifications = ({ onNavigate }) => {
                 >
                   <div className="flex items-start justify-between">
                     <div className="flex-1">
-                      <div className="flex items-center gap-2">
-                        <span className="text-lg">
-                          {getNotificationIcon(notification.type)}
-                        </span>
-                        <h4
-                          className={`font-medium ${!notification.is_read ? "text-gray-900" : "text-gray-700"}`}
-                        >
-                          {getNotificationTitle(notification.type)}
-                        </h4>
-                      </div>
-                      <p className="text-sm text-gray-600 mt-1">
-                        {notification.message}
-                      </p>
-                      <p className="text-xs text-gray-400 mt-2">
-                        {formatDate(notification.created_at)}
-                      </p>
+                      {/* Leave Request - Clean format */}
+                      {notification.type === "leave" ? (
+                        <div>
+                          <span className="text-sm font-medium">
+                            <span className="text-lg">
+                              {getNotificationIcon(notification.type)}
+                            </span>
+                            Leave Request
+                          </span>
+                          <p className="text-sm text-gray-600 mt-1">
+                            {notification.message}
+                          </p>
+                          <p className="text-xs text-gray-400 mt-1">
+                            {formatDate(notification.created_at)}
+                          </p>
+                        </div>
+                      ) : (
+                        /* Other notification types - keep original format */
+                        <div>
+                          <div className="flex items-center gap-2">
+                            <span className="text-lg">
+                              {getNotificationIcon(notification.type)}
+                            </span>
+                            <h4
+                              className={`font-medium ${
+                                !notification.is_read
+                                  ? "text-gray-900"
+                                  : "text-gray-700"
+                              }`}
+                            >
+                              {getNotificationTitle(notification.type)}
+                            </h4>
+                          </div>
+                          <p className="text-sm text-gray-600 mt-1">
+                            {notification.message}
+                          </p>
+                          <p className="text-xs text-gray-400 mt-2">
+                            {formatDate(notification.created_at)}
+                          </p>
+                        </div>
+                      )}
                     </div>
                     {!notification.is_read && (
                       <button
@@ -248,6 +343,15 @@ const Notifications = ({ onNavigate }) => {
                         <CheckIcon className="h-4 w-4" />
                       </button>
                     )}
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleDismiss(notification.id);
+                      }}
+                      className="ml-2 text-gray-400 hover:text-gray-600"
+                    >
+                      <XMarkIcon className="h-4 w-4" />
+                    </button>
                   </div>
                 </div>
               ))

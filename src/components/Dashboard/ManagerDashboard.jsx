@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useCallback, useMemo } from "react";
 import Header from "../Common/Header";
 import { supabase } from "../../config/supabase";
 import { useAuthStore } from "../../stores/authStore";
@@ -7,6 +7,7 @@ import {
   getAttendanceCorrections,
   approveAttendanceCorrection,
   rejectAttendanceCorrection,
+  createNotification,
 } from "../../services/supabaseService";
 import {
   ChartBarIcon,
@@ -16,6 +17,106 @@ import {
   ClockIcon,
 } from "@heroicons/react/24/outline";
 
+// ============ UI Components ============
+const StatCard = ({ label, value, color, subtext }) => (
+  <div className={`card bg-${color}-50 border-l-4 border-${color}-500`}>
+    <div className="text-gray-600 text-sm font-semibold">{label}</div>
+    <div className={`text-3xl font-bold text-${color}-600`}>{value}</div>
+    {subtext && <div className="text-xs text-gray-500">{subtext}</div>}
+  </div>
+);
+
+const StatusBadge = ({ status }) => {
+  const colors = {
+    pending: "bg-orange-100 text-orange-800",
+    approved: "bg-green-100 text-green-800",
+    rejected: "bg-red-100 text-red-800",
+    "checked-out": "bg-green-100 text-green-800",
+  };
+  return (
+    <span
+      className={`px-2 py-1 rounded text-xs font-semibold ${colors[status] || "bg-gray-100 text-gray-800"}`}
+    >
+      {status}
+    </span>
+  );
+};
+
+const ActionButtons = ({ status, onApprove, onReject, loading }) => (
+  <div className="space-x-2 flex">
+    <button
+      onClick={onApprove}
+      disabled={loading}
+      className="text-green-600 hover:text-green-800 font-semibold text-sm disabled:opacity-50"
+    >
+      ✓ Approve
+    </button>
+    <button
+      onClick={onReject}
+      disabled={loading}
+      className="text-red-600 hover:text-red-800 font-semibold text-sm disabled:opacity-50"
+    >
+      ✕ Reject
+    </button>
+  </div>
+);
+
+const RejectionModal = ({
+  isOpen,
+  reason,
+  onChange,
+  onConfirm,
+  onCancel,
+  loading,
+  title,
+}) => {
+  if (!isOpen) return null;
+  return (
+    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+      <div className="bg-white rounded-lg p-6 max-w-md w-full">
+        <h3 className="text-lg font-bold mb-4">{title}</h3>
+        <textarea
+          value={reason}
+          onChange={(e) => onChange(e.target.value)}
+          placeholder="Enter reason for rejection..."
+          className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:border-red-500 mb-4"
+          rows="4"
+        />
+        <div className="flex gap-3">
+          <button
+            onClick={onConfirm}
+            disabled={loading || !reason.trim()}
+            className="flex-1 bg-red-600 hover:bg-red-700 text-white font-semibold py-2 px-4 rounded-lg transition disabled:opacity-50"
+          >
+            {loading ? "Rejecting..." : "Reject"}
+          </button>
+          <button
+            onClick={onCancel}
+            className="flex-1 bg-gray-300 hover:bg-gray-400 text-gray-800 font-semibold py-2 px-4 rounded-lg transition"
+          >
+            Cancel
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+const TabButton = ({ active, onClick, icon: Icon, label }) => (
+  <button
+    onClick={onClick}
+    className={`flex-1 py-3 px-4 text-center font-semibold transition flex items-center justify-center gap-2 ${
+      active
+        ? "bg-blue-500 text-white"
+        : "bg-gray-100 text-gray-700 hover:bg-gray-200"
+    }`}
+  >
+    <Icon className="w-5 h-5" />
+    <span>{label}</span>
+  </button>
+);
+
+// ============ Main Component ============
 const ManagerDashboard = () => {
   const { user, userProfile } = useAuthStore();
   const [activeTab, setActiveTab] = useState("dashboard");
@@ -30,93 +131,88 @@ const ManagerDashboard = () => {
   });
   const [leaveRequests, setLeaveRequests] = useState([]);
   const [teamAttendance, setTeamAttendance] = useState([]);
-  const [rejectingRequestId, setRejectingRequestId] = useState(null);
-  const [rejectionReason, setRejectionReason] = useState("");
-  const [attendanceFilters, setAttendanceFilters] = useState({
-    date: new Date().toISOString().split("T")[0],
-    employee: "",
-  });
-  const [leaveFilters, setLeaveFilters] = useState({
-    status: "all",
-    employee: "",
-  });
-  const [leaveBalances, setLeaveBalances] = useState({});
   const [corrections, setCorrections] = useState([]);
-  const [rejectingCorrectionId, setRejectingCorrectionId] = useState(null);
-  const [correctionRejectionReason, setCorrectionRejectionReason] =
-    useState("");
+  const [filters, setFilters] = useState({
+    attendanceDate: new Date().toISOString().split("T")[0],
+    attendanceEmployee: "",
+    leaveStatus: "all",
+    leaveEmployee: "",
+  });
+  const [teamIds, setTeamIds] = useState([]);
+  const [rejectModal, setRejectModal] = useState({
+    type: "",
+    id: null,
+    reason: "",
+  });
 
+  // Combined effect for data fetching
   useEffect(() => {
-    if (user?.id) {
-      fetchManagerData();
-      setupRealtimeSubscriptions();
-    }
+    if (!user?.id) return;
 
-    return () => {
-      // Cleanup subscriptions
-      if (window.leaveSubscription) {
-        supabase.removeChannel(window.leaveSubscription);
-      }
-      if (window.notificationSubscription) {
-        supabase.removeChannel(window.notificationSubscription);
+    const initDashboard = async () => {
+      if (userProfile?.id) {
+        await fetchManagerData();
+        setupRealtimeSubscriptions();
+      } else {
+        const { data: profileData } = await supabase
+          .from("users")
+          .select("*")
+          .eq("id", user.id)
+          .single();
+        if (profileData) {
+          useAuthStore.getState().setUserProfile(profileData);
+          await fetchManagerData();
+          setupRealtimeSubscriptions();
+        }
       }
     };
-  }, [user?.id]);
 
-  const setupRealtimeSubscriptions = () => {
-    // Subscribe to leave requests changes
+    initDashboard();
+    return () => {
+      if (window.leaveSubscription)
+        supabase.removeChannel(window.leaveSubscription);
+      if (window.notificationSubscription)
+        supabase.removeChannel(window.notificationSubscription);
+    };
+  }, [user?.id, userProfile?.id]);
+
+  const setupRealtimeSubscriptions = useCallback(() => {
     window.leaveSubscription = supabase
       .channel("leave_requests_changes")
       .on(
         "postgres_changes",
-        {
-          event: "*",
-          schema: "public",
-          table: "leave_requests",
-        },
-        (payload) => {
-          console.log("Leave request change:", payload);
-          fetchManagerData(); // Refresh data when leave requests change
-        },
+        { event: "*", schema: "public", table: "leave_requests" },
+        fetchManagerData,
       )
       .subscribe();
+  }, []);
 
-    // Note: Notifications are handled by the Notifications component
-    // No need to duplicate subscription here
-  };
-
-  const fetchManagerData = async () => {
+  const fetchManagerData = useCallback(async () => {
     setLoading(true);
     try {
-      console.log(
-        "Fetching manager data for user:",
-        user?.id,
-        "Role:",
-        user?.role,
+      const { data: departments } = await supabase
+        .from("departments")
+        .select("id, name");
+      const departmentMap = Object.fromEntries(
+        (departments || []).map((d) => [d.id, d.name]),
       );
 
-      // First, try fetching all users without any filter to check RLS
-      const { data: allUsers, error: allError } = await supabase
-        .from("users")
-        .select("*");
-
-      console.log("All users (no filter):", allUsers, "Error:", allError);
-
-      if (allError) {
-        console.error("Cannot read users table - RLS blocking:", allError);
-        toast.error(
-          "RLS policy is blocking access to users table. Check manager permissions.",
-        );
-        setLoading(false);
-        return;
+      let employeeQuery = supabase.from("users").select("*");
+      if (userProfile?.role !== "admin") {
+        employeeQuery = employeeQuery.eq("manager_id", user.id);
       }
 
-      // Filter for employees
-      const employees = allUsers?.filter((u) => u.role === "employee") || [];
-      console.log("Filtered employees:", employees);
+      const { data: allUsers } = await employeeQuery;
+      const employees = (allUsers || [])
+        .map((emp) => ({
+          ...emp,
+          department: departmentMap[emp.department_id] || null,
+        }))
+        .filter((u) =>
+          userProfile?.role === "admin" ? u.role === "employee" : true,
+        );
 
       if (employees.length === 0) {
-        console.log("No employees found");
         setEmployees([]);
         setLeaveRequests([]);
         setTeamAttendance([]);
@@ -124,293 +220,220 @@ const ManagerDashboard = () => {
           teamSize: 0,
           presentToday: 0,
           leaveRequests: 0,
+          pendingCorrections: 0,
           teamAttendance: [],
         });
-        setLoading(false);
         return;
       }
 
       setEmployees(employees);
-      const teamIds = employees.map((t) => t.id);
-      await fetchLeaveAndAttendance(teamIds, employees);
+      const ids = employees.map((t) => t.id);
+      setTeamIds(ids);
+      await fetchLeaveAndAttendance(ids);
     } catch (error) {
-      console.error("Error fetching manager data:", error);
-      toast.error("Failed to load manager data: " + error.message);
-      setLoading(false);
-    }
-  };
-
-  const fetchLeaveAndAttendance = async (teamIds, teamData) => {
-    try {
-      // Fetch team leave requests
-      console.log("Team IDs:", teamIds);
-
-      const { data: leaveData, error: leaveError } = await supabase
-        .from("leave_requests")
-        .select(
-          `
-          id,
-          user_id,
-          leave_type,
-          start_date,
-          end_date,
-          reason,
-          status,
-          approved_by,
-          rejection_reason,
-          created_at,
-          updated_at,
-          users:user_id (
-            id,
-            full_name,
-            email
-          )
-        `,
-        )
-        .in("user_id", teamIds);
-
-      console.log("Leave data:", leaveData, "Error:", leaveError);
-
-      if (leaveError) {
-        console.error("Leave data error:", leaveError);
-      }
-
-      setLeaveRequests(leaveData || []);
-
-      // Fetch attendance corrections
-      console.log(
-        "Fetching corrections for user:",
-        user.id,
-        "role:",
-        userProfile?.role,
-      );
-      const { data: correctionsData, error: correctionsError } =
-        await getAttendanceCorrections(user.id, userProfile?.role);
-
-      console.log(
-        "Corrections data:",
-        correctionsData,
-        "Error:",
-        correctionsError,
-      );
-
-      if (correctionsError) {
-        console.error("Corrections data error:", correctionsError);
-      }
-
-      setCorrections(correctionsData || []);
-
-      // Fetch team attendance today
-      const today = new Date().toISOString().split("T")[0];
-      const tomorrow = new Date(Date.now() + 86400000)
-        .toISOString()
-        .split("T")[0];
-
-      const { data: attendanceData, error: attendanceError } = await supabase
-        .from("attendance")
-        .select(
-          `
-          *,
-          users:user_id (
-            id,
-            full_name,
-            email
-          )
-        `,
-        )
-        .in("user_id", teamIds)
-        .gte("check_in_time", today)
-        .lt("check_in_time", tomorrow);
-
-      console.log(
-        "Attendance data:",
-        attendanceData,
-        "Error:",
-        attendanceError,
-      );
-
-      if (attendanceError) {
-        console.error("Attendance data error:", attendanceError);
-      }
-
-      setTeamAttendance(attendanceData || []);
-
-      setStats({
-        teamSize: teamData?.length || 0,
-        presentToday:
-          attendanceData?.filter((a) => a.check_out_time).length || 0,
-        leaveRequests:
-          leaveData?.filter((l) => l.status === "pending").length || 0,
-        pendingCorrections:
-          correctionsData?.filter((c) => c.status === "pending").length || 0,
-        teamAttendance: attendanceData || [],
-      });
-
-      console.log("Manager data loaded successfully");
-    } catch (error) {
-      console.error("Error in fetchLeaveAndAttendance:", error);
+      toast.error("Failed to load manager data");
     } finally {
       setLoading(false);
     }
-  };
+  }, [user?.id, userProfile?.role]);
+
+  const fetchLeaveAndAttendance = useCallback(
+    async (ids) => {
+      const currentTeamIds = ids || teamIds;
+      if (currentTeamIds.length === 0) return;
+
+      try {
+        const [
+          { data: leaveData },
+          { data: correctionsData },
+          { data: attendanceData },
+        ] = await Promise.all([
+          supabase
+            .from("leave_requests")
+            .select(
+              "*, users:user_id(id, full_name, email), approver:approved_by(id, full_name)",
+            )
+            .in("user_id", currentTeamIds),
+          getAttendanceCorrections(user.id, userProfile?.role),
+          supabase
+            .from("attendance")
+            .select("*, users:user_id(id, full_name, email)")
+            .in("user_id", currentTeamIds)
+            .gte("check_in_time", new Date().toISOString().split("T")[0])
+            .lt(
+              "check_in_time",
+              new Date(Date.now() + 86400000).toISOString().split("T")[0],
+            ),
+        ]);
+
+        const filteredCorrections = (correctionsData || []).filter((c) =>
+          userProfile?.role === "manager"
+            ? currentTeamIds.includes(c.user_id)
+            : true,
+        );
+
+        setLeaveRequests(leaveData || []);
+        setCorrections(filteredCorrections);
+        setTeamAttendance(attendanceData || []);
+        setStats({
+          teamSize: employees.length,
+          presentToday:
+            attendanceData?.filter((a) => a.check_out_time).length || 0,
+          leaveRequests:
+            leaveData?.filter((l) => l.status === "pending").length || 0,
+          pendingCorrections:
+            filteredCorrections?.filter((c) => c.status === "pending").length ||
+            0,
+          teamAttendance: attendanceData || [],
+        });
+      } catch (error) {
+        console.error("Error fetching data:", error);
+      } finally {
+        setLoading(false);
+      }
+    },
+    [teamIds, user?.id, userProfile?.role, employees.length],
+  );
 
   const handleApproveLeave = async (leaveId) => {
-    if (!user?.id) {
-      toast.error("User session not found. Please login again.");
-      return;
-    }
-
+    if (!user?.id) return toast.error("Session expired");
     try {
       setLoading(true);
-      console.log("Approving leave request:", leaveId);
-
-      const { data, error } = await supabase
+      const { data: leaveRequest } = await supabase
         .from("leave_requests")
-        .update({
-          status: "approved",
-          approved_by: user.id,
-        })
+        .select("user_id")
         .eq("id", leaveId)
-        .select();
-
-      console.log("Approve response:", { data, error });
-
+        .single();
+      const { error } = await supabase
+        .from("leave_requests")
+        .update({ status: "approved", approved_by: user.id })
+        .eq("id", leaveId);
       if (error) throw error;
-
-      if (!data || data.length === 0) {
-        throw new Error("Request could not be updated. Check permissions.");
-      }
-
-      toast.success("✓ Leave request approved!");
-      await fetchManagerData();
+      await createNotification(
+        leaveRequest.user_id,
+        "Your leave request has been approved.",
+        "leave",
+        leaveId,
+      );
+      toast.success("Leave request approved!");
+      fetchManagerData();
     } catch (error) {
-      console.error("Approve error:", error);
-      toast.error(`Failed to approve: ${error.message || "Unknown error"}`);
+      toast.error(`Failed to approve: ${error.message}`);
     } finally {
       setLoading(false);
     }
   };
 
-  const handleRejectLeave = async (leaveId) => {
-    if (!user?.id) {
-      toast.error("User session not found. Please login again.");
-      return;
-    }
-
-    if (!rejectionReason.trim()) {
-      toast.error("Please enter a reason for rejection");
-      return;
-    }
-
+  const handleRejectLeave = async () => {
+    if (!user?.id || !rejectModal.reason.trim())
+      return toast.error("Please enter a reason");
     try {
       setLoading(true);
-      console.log("Rejecting leave request:", leaveId);
-
-      const { data, error } = await supabase
+      const { error } = await supabase
         .from("leave_requests")
         .update({
           status: "rejected",
-          rejection_reason: rejectionReason,
+          rejection_reason: rejectModal.reason,
           approved_by: user.id,
         })
-        .eq("id", leaveId)
-        .select();
-
-      console.log("Reject response:", { data, error });
-
+        .eq("id", rejectModal.id);
       if (error) throw error;
-
-      if (!data || data.length === 0) {
-        throw new Error("Request could not be updated. Check permissions.");
-      }
-
-      toast.success("✕ Leave request rejected");
-      setRejectingRequestId(null);
-      setRejectionReason("");
-      await fetchManagerData();
+      toast.success("Leave request rejected");
+      setRejectModal({ type: "", id: null, reason: "" });
+      fetchManagerData();
     } catch (error) {
-      console.error("Reject error:", error);
-      toast.error(`Failed to reject: ${error.message || "Unknown error"}`);
+      toast.error(`Failed to reject: ${error.message}`);
     } finally {
       setLoading(false);
     }
   };
 
   const handleApproveCorrection = async (correctionId) => {
-    if (!user?.id) {
-      toast.error("User session not found. Please login again.");
-      return;
-    }
-
+    if (!user?.id) return toast.error("Session expired");
     try {
       setLoading(true);
-      console.log("Approving correction request:", correctionId);
-
       const result = await approveAttendanceCorrection(correctionId, user.id);
-
-      if (result.error) throw result.error;
-
-      toast.success("✓ Correction request approved!");
-      await fetchManagerData();
+      if (result?.error) throw new Error(result.error.message);
+      toast.success("Correction request approved!");
+      fetchManagerData();
     } catch (error) {
-      console.error("Approve correction error:", error);
-      toast.error(`Failed to approve: ${error.message || "Unknown error"}`);
+      toast.error(`Failed to approve: ${error.message}`);
     } finally {
       setLoading(false);
     }
   };
 
-  const handleRejectCorrection = async (correctionId) => {
-    if (!user?.id) {
-      toast.error("User session not found. Please login again.");
-      return;
-    }
-
-    if (!correctionRejectionReason.trim()) {
-      toast.error("Please enter a reason for rejection");
-      return;
-    }
-
+  const handleRejectCorrection = async () => {
+    if (!user?.id || !rejectModal.reason.trim())
+      return toast.error("Please enter a reason");
     try {
       setLoading(true);
-      console.log("Rejecting correction request:", correctionId);
-
       const result = await rejectAttendanceCorrection(
-        correctionId,
+        rejectModal.id,
         user.id,
-        correctionRejectionReason,
+        rejectModal.reason,
       );
-
-      if (result.error) throw result.error;
-
-      toast.success("✕ Correction request rejected");
-      setRejectingCorrectionId(null);
-      setCorrectionRejectionReason("");
-      await fetchManagerData();
+      if (result?.error) throw new Error(result.error.message);
+      toast.success("Correction request rejected");
+      setRejectModal({ type: "", id: null, reason: "" });
+      fetchManagerData();
     } catch (error) {
-      console.error("Reject correction error:", error);
-      toast.error(`Failed to reject: ${error.message || "Unknown error"}`);
+      toast.error(`Failed to reject: ${error.message}`);
     } finally {
       setLoading(false);
     }
   };
 
-  const handleNotificationNavigate = (type, notification) => {
-    if (type === "leave") {
-      setActiveTab("leave-requests");
-    } else if (type === "correction") {
-      setActiveTab("corrections");
+  const fetchAttendanceByDate = async () => {
+    if (teamIds.length === 0) return;
+    try {
+      setLoading(true);
+      const nextDate = new Date(
+        new Date(filters.attendanceDate).getTime() + 86400000,
+      )
+        .toISOString()
+        .split("T")[0];
+      const { data } = await supabase
+        .from("attendance")
+        .select("*, users:user_id(id, full_name, email)")
+        .in("user_id", teamIds)
+        .gte("check_in_time", filters.attendanceDate)
+        .lt("check_in_time", nextDate);
+      setTeamAttendance(data || []);
+    } catch (error) {
+      toast.error("Failed to fetch attendance");
+    } finally {
+      setLoading(false);
     }
   };
+
+  // Filtered data using useMemo
+  const filteredLeaveRequests = useMemo(() => {
+    return leaveRequests.filter((r) => {
+      const statusMatch =
+        filters.leaveStatus === "all" || r.status === filters.leaveStatus;
+      const employeeMatch =
+        !filters.leaveEmployee || r.user_id === filters.leaveEmployee;
+      return statusMatch && employeeMatch;
+    });
+  }, [leaveRequests, filters.leaveStatus, filters.leaveEmployee]);
+
+  const filteredAttendance = useMemo(() => {
+    if (!filters.attendanceEmployee) return teamAttendance;
+    return teamAttendance.filter(
+      (a) => a.user_id === filters.attendanceEmployee,
+    );
+  }, [teamAttendance, filters.attendanceEmployee]);
 
   return (
     <div className="flex flex-col min-h-screen bg-gray-100">
       <Header
         title="Manager Dashboard"
-        onNavigate={handleNotificationNavigate}
+        onNavigate={(type) =>
+          setActiveTab(type === "leave" ? "leave-requests" : "corrections")
+        }
       />
 
-      {/* Debug Info */}
       {loading && (
         <div className="bg-blue-100 border-l-4 border-blue-500 text-blue-700 p-4 m-4">
           <p>Loading data...</p>
@@ -421,45 +444,38 @@ const ManagerDashboard = () => {
         {/* Dashboard Tab */}
         {activeTab === "dashboard" && (
           <div className="space-y-6">
-            <h2 className="text-2xl font-bold">Dashboard - Quick Stats</h2>
-
-            {/* Stats Cards */}
+            <div className="flex justify-between items-center">
+              <h2 className="text-2xl font-bold">Dashboard - Quick Stats</h2>
+              <button
+                onClick={fetchManagerData}
+                disabled={loading}
+                className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg disabled:opacity-50 text-sm"
+              >
+                {loading ? "Loading..." : "Refresh Data"}
+              </button>
+            </div>
             <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-              <div className="card bg-blue-50 border-l-4 border-blue-500">
-                <div className="text-gray-600 text-sm font-semibold">
-                  Today's Attendance
-                </div>
-                <div className="text-3xl font-bold text-blue-600">
-                  {stats.presentToday}
-                </div>
-                <div className="text-xs text-gray-500">
-                  out of {stats.teamSize} team members
-                </div>
-              </div>
-              <div className="card bg-orange-50 border-l-4 border-orange-500">
-                <div className="text-gray-600 text-sm font-semibold">
-                  Pending Leave Requests
-                </div>
-                <div className="text-3xl font-bold text-orange-600">
-                  {stats.leaveRequests}
-                </div>
-              </div>
-              <div className="card bg-purple-50 border-l-4 border-purple-500">
-                <div className="text-gray-600 text-sm font-semibold">
-                  Pending Attendance Corrections
-                </div>
-                <div className="text-3xl font-bold text-purple-600">
-                  {stats.pendingCorrections}
-                </div>
-              </div>
-              <div className="card bg-green-50 border-l-4 border-green-500">
-                <div className="text-gray-600 text-sm font-semibold">
-                  Team Size
-                </div>
-                <div className="text-3xl font-bold text-green-600">
-                  {stats.teamSize}
-                </div>
-              </div>
+              <StatCard
+                label="Today's Attendance"
+                value={stats.presentToday}
+                color="blue"
+                subtext={`out of ${stats.teamSize} team members`}
+              />
+              <StatCard
+                label="Pending Leave Requests"
+                value={stats.leaveRequests}
+                color="orange"
+              />
+              <StatCard
+                label="Pending Attendance Corrections"
+                value={stats.pendingCorrections}
+                color="purple"
+              />
+              <StatCard
+                label="Team Size"
+                value={stats.teamSize}
+                color="green"
+              />
             </div>
           </div>
         )}
@@ -468,7 +484,6 @@ const ManagerDashboard = () => {
         {activeTab === "employee-directory" && (
           <div className="space-y-4">
             <h2 className="text-2xl font-bold">Team Members</h2>
-
             <div className="card">
               <div className="overflow-x-auto">
                 <table className="w-full text-sm">
@@ -478,7 +493,6 @@ const ManagerDashboard = () => {
                       <th className="p-3 text-left">Email</th>
                       <th className="p-3 text-left">Role</th>
                       <th className="p-3 text-left">Department</th>
-                      <th className="p-3 text-left">Leave Balance</th>
                       <th className="p-3 text-left">Status</th>
                     </tr>
                   </thead>
@@ -486,7 +500,7 @@ const ManagerDashboard = () => {
                     {employees.length === 0 ? (
                       <tr>
                         <td
-                          colSpan="6"
+                          colSpan="5"
                           className="p-3 text-center text-gray-500"
                         >
                           No team members found
@@ -503,12 +517,7 @@ const ManagerDashboard = () => {
                             </span>
                           </td>
                           <td className="p-3">
-                            {emp.department_id || "Not Assigned"}
-                          </td>
-                          <td className="p-3">
-                            <span className="px-2 py-1 bg-green-100 text-green-800 rounded text-xs font-semibold">
-                              {leaveBalances[emp.id]?.remaining_days || 0} days
-                            </span>
+                            {emp.department || "Not Assigned"}
                           </td>
                           <td className="p-3">
                             <span className="px-2 py-1 bg-green-100 text-green-800 rounded text-xs font-semibold">
@@ -529,8 +538,6 @@ const ManagerDashboard = () => {
         {activeTab === "leave-requests" && (
           <div className="space-y-4">
             <h2 className="text-2xl font-bold">Leave Requests</h2>
-
-            {/* Filters */}
             <div className="card">
               <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                 <div>
@@ -538,14 +545,11 @@ const ManagerDashboard = () => {
                     Status
                   </label>
                   <select
-                    value={leaveFilters.status}
+                    value={filters.leaveStatus}
                     onChange={(e) =>
-                      setLeaveFilters((prev) => ({
-                        ...prev,
-                        status: e.target.value,
-                      }))
+                      setFilters((f) => ({ ...f, leaveStatus: e.target.value }))
                     }
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:border-blue-500"
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg"
                   >
                     <option value="all">All Status</option>
                     <option value="pending">Pending</option>
@@ -558,14 +562,14 @@ const ManagerDashboard = () => {
                     Employee
                   </label>
                   <select
-                    value={leaveFilters.employee}
+                    value={filters.leaveEmployee}
                     onChange={(e) =>
-                      setLeaveFilters((prev) => ({
-                        ...prev,
-                        employee: e.target.value,
+                      setFilters((f) => ({
+                        ...f,
+                        leaveEmployee: e.target.value,
                       }))
                     }
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:border-blue-500"
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg"
                   >
                     <option value="">All Employees</option>
                     {employees.map((emp) => (
@@ -575,55 +579,19 @@ const ManagerDashboard = () => {
                     ))}
                   </select>
                 </div>
-                <div className="flex items-end">
-                  <button
-                    onClick={() => {
-                      /* TODO: Apply filters */
-                    }}
-                    className="w-full bg-blue-600 hover:bg-blue-700 text-white font-semibold py-2 px-4 rounded-lg transition"
-                  >
-                    Apply Filters
-                  </button>
-                </div>
               </div>
             </div>
-
-            {/* Rejection Reason Modal */}
-            {rejectingRequestId && (
-              <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-                <div className="bg-white rounded-lg p-6 max-w-md w-full">
-                  <h3 className="text-lg font-bold mb-4">
-                    Reject Leave Request
-                  </h3>
-                  <textarea
-                    value={rejectionReason}
-                    onChange={(e) => setRejectionReason(e.target.value)}
-                    placeholder="Enter reason for rejection..."
-                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:border-red-500 mb-4"
-                    rows="4"
-                  ></textarea>
-                  <div className="flex gap-3">
-                    <button
-                      onClick={() => handleRejectLeave(rejectingRequestId)}
-                      disabled={loading || !rejectionReason.trim()}
-                      className="flex-1 bg-red-600 hover:bg-red-700 text-white font-semibold py-2 px-4 rounded-lg transition disabled:opacity-50"
-                    >
-                      {loading ? "Rejecting..." : "Reject"}
-                    </button>
-                    <button
-                      onClick={() => {
-                        setRejectingRequestId(null);
-                        setRejectionReason("");
-                      }}
-                      className="flex-1 bg-gray-300 hover:bg-gray-400 text-gray-800 font-semibold py-2 px-4 rounded-lg transition"
-                    >
-                      Cancel
-                    </button>
-                  </div>
-                </div>
-              </div>
-            )}
-
+            <RejectionModal
+              isOpen={rejectModal.type === "leave"}
+              reason={rejectModal.reason}
+              onChange={(r) => setRejectModal((m) => ({ ...m, reason: r }))}
+              onConfirm={handleRejectLeave}
+              onCancel={() =>
+                setRejectModal({ type: "", id: null, reason: "" })
+              }
+              loading={loading}
+              title="Reject Leave Request"
+            />
             <div className="card">
               <div className="overflow-x-auto">
                 <table className="w-full text-sm">
@@ -639,7 +607,7 @@ const ManagerDashboard = () => {
                     </tr>
                   </thead>
                   <tbody>
-                    {leaveRequests.length === 0 ? (
+                    {filteredLeaveRequests.length === 0 ? (
                       <tr>
                         <td
                           colSpan="7"
@@ -649,7 +617,7 @@ const ManagerDashboard = () => {
                         </td>
                       </tr>
                     ) : (
-                      leaveRequests.map((request) => (
+                      filteredLeaveRequests.map((request) => (
                         <tr
                           key={request.id}
                           className="border-b hover:bg-gray-50"
@@ -672,42 +640,26 @@ const ManagerDashboard = () => {
                             {request.reason || "-"}
                           </td>
                           <td className="p-3">
-                            <span
-                              className={`px-2 py-1 rounded text-xs font-semibold ${
-                                request.status === "pending"
-                                  ? "bg-orange-100 text-orange-800"
-                                  : request.status === "approved"
-                                    ? "bg-green-100 text-green-800"
-                                    : "bg-red-100 text-red-800"
-                              }`}
-                            >
-                              {request.status}
-                            </span>
+                            <StatusBadge status={request.status} />
                           </td>
                           <td className="p-3">
                             {request.status === "pending" && (
-                              <div className="space-x-2 flex">
-                                <button
-                                  onClick={() => handleApproveLeave(request.id)}
-                                  disabled={loading}
-                                  className="text-green-600 hover:text-green-800 font-semibold text-sm disabled:opacity-50"
-                                >
-                                  ✓ Approve
-                                </button>
-                                <button
-                                  onClick={() =>
-                                    setRejectingRequestId(request.id)
-                                  }
-                                  disabled={loading}
-                                  className="text-red-600 hover:text-red-800 font-semibold text-sm disabled:opacity-50"
-                                >
-                                  ✕ Reject
-                                </button>
-                              </div>
+                              <ActionButtons
+                                status={request.status}
+                                onApprove={() => handleApproveLeave(request.id)}
+                                onReject={() =>
+                                  setRejectModal({
+                                    type: "leave",
+                                    id: request.id,
+                                    reason: "",
+                                  })
+                                }
+                                loading={loading}
+                              />
                             )}
                             {request.status === "rejected" &&
                               request.rejection_reason && (
-                                <div className="text-xs text-red-600 max-w-xs">
+                                <div className="text-xs text-red-600">
                                   <strong>Reason:</strong>{" "}
                                   {request.rejection_reason}
                                 </div>
@@ -723,51 +675,21 @@ const ManagerDashboard = () => {
           </div>
         )}
 
-        {/* Attendance Corrections Tab */}
+        {/* Corrections Tab */}
         {activeTab === "corrections" && (
           <div className="space-y-4">
             <h2 className="text-2xl font-bold">Attendance Corrections</h2>
-
-            {/* Rejection Reason Modal */}
-            {rejectingCorrectionId && (
-              <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-                <div className="bg-white rounded-lg p-6 max-w-md w-full">
-                  <h3 className="text-lg font-bold mb-4">
-                    Reject Correction Request
-                  </h3>
-                  <textarea
-                    value={correctionRejectionReason}
-                    onChange={(e) =>
-                      setCorrectionRejectionReason(e.target.value)
-                    }
-                    placeholder="Enter reason for rejection..."
-                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:border-red-500 mb-4"
-                    rows="4"
-                  ></textarea>
-                  <div className="flex gap-3">
-                    <button
-                      onClick={() =>
-                        handleRejectCorrection(rejectingCorrectionId)
-                      }
-                      disabled={loading || !correctionRejectionReason.trim()}
-                      className="flex-1 bg-red-600 hover:bg-red-700 text-white font-semibold py-2 px-4 rounded-lg transition disabled:opacity-50"
-                    >
-                      {loading ? "Rejecting..." : "Reject"}
-                    </button>
-                    <button
-                      onClick={() => {
-                        setRejectingCorrectionId(null);
-                        setCorrectionRejectionReason("");
-                      }}
-                      className="flex-1 bg-gray-300 hover:bg-gray-400 text-gray-800 font-semibold py-2 px-4 rounded-lg transition"
-                    >
-                      Cancel
-                    </button>
-                  </div>
-                </div>
-              </div>
-            )}
-
+            <RejectionModal
+              isOpen={rejectModal.type === "correction"}
+              reason={rejectModal.reason}
+              onChange={(r) => setRejectModal((m) => ({ ...m, reason: r }))}
+              onConfirm={handleRejectCorrection}
+              onCancel={() =>
+                setRejectModal({ type: "", id: null, reason: "" })
+              }
+              loading={loading}
+              title="Reject Correction Request"
+            />
             <div className="card">
               <div className="overflow-x-auto">
                 <table className="w-full text-sm">
@@ -776,7 +698,7 @@ const ManagerDashboard = () => {
                       <th className="p-3 text-left">Employee</th>
                       <th className="p-3 text-left">Date</th>
                       <th className="p-3 text-left">Missing Type</th>
-                      <th className="p-3 text-left">Requested Time</th>
+                      <th className="p-3 text-left">Time</th>
                       <th className="p-3 text-left">Reason</th>
                       <th className="p-3 text-left">Status</th>
                       <th className="p-3 text-left">Actions</th>
@@ -818,44 +740,27 @@ const ManagerDashboard = () => {
                             {correction.reason || "-"}
                           </td>
                           <td className="p-3">
-                            <span
-                              className={`px-2 py-1 rounded text-xs font-semibold ${
-                                correction.status === "pending"
-                                  ? "bg-orange-100 text-orange-800"
-                                  : correction.status === "approved"
-                                    ? "bg-green-100 text-green-800"
-                                    : "bg-red-100 text-red-800"
-                              }`}
-                            >
-                              {correction.status}
-                            </span>
+                            <StatusBadge status={correction.status} />
                           </td>
                           <td className="p-3">
                             {correction.status === "pending" && (
-                              <div className="space-x-2 flex">
-                                <button
-                                  onClick={() =>
-                                    handleApproveCorrection(correction.id)
-                                  }
-                                  disabled={loading}
-                                  className="text-green-600 hover:text-green-800 font-semibold text-sm disabled:opacity-50"
-                                >
-                                  ✓ Approve
-                                </button>
-                                <button
-                                  onClick={() =>
-                                    setRejectingCorrectionId(correction.id)
-                                  }
-                                  disabled={loading}
-                                  className="text-red-600 hover:text-red-800 font-semibold text-sm disabled:opacity-50"
-                                >
-                                  ✕ Reject
-                                </button>
-                              </div>
+                              <ActionButtons
+                                onApprove={() =>
+                                  handleApproveCorrection(correction.id)
+                                }
+                                onReject={() =>
+                                  setRejectModal({
+                                    type: "correction",
+                                    id: correction.id,
+                                    reason: "",
+                                  })
+                                }
+                                loading={loading}
+                              />
                             )}
                             {correction.status === "rejected" &&
                               correction.remarks && (
-                                <div className="text-xs text-red-600 max-w-xs">
+                                <div className="text-xs text-red-600">
                                   <strong>Reason:</strong> {correction.remarks}
                                 </div>
                               )}
@@ -874,8 +779,6 @@ const ManagerDashboard = () => {
         {activeTab === "attendance" && (
           <div className="space-y-4">
             <h2 className="text-2xl font-bold">Team Attendance</h2>
-
-            {/* Filters */}
             <div className="card">
               <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                 <div>
@@ -884,14 +787,14 @@ const ManagerDashboard = () => {
                   </label>
                   <input
                     type="date"
-                    value={attendanceFilters.date}
+                    value={filters.attendanceDate}
                     onChange={(e) =>
-                      setAttendanceFilters((prev) => ({
-                        ...prev,
-                        date: e.target.value,
+                      setFilters((f) => ({
+                        ...f,
+                        attendanceDate: e.target.value,
                       }))
                     }
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:border-blue-500"
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg"
                   />
                 </div>
                 <div>
@@ -899,14 +802,14 @@ const ManagerDashboard = () => {
                     Employee
                   </label>
                   <select
-                    value={attendanceFilters.employee}
+                    value={filters.attendanceEmployee}
                     onChange={(e) =>
-                      setAttendanceFilters((prev) => ({
-                        ...prev,
-                        employee: e.target.value,
+                      setFilters((f) => ({
+                        ...f,
+                        attendanceEmployee: e.target.value,
                       }))
                     }
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:border-blue-500"
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg"
                   >
                     <option value="">All Employees</option>
                     {employees.map((emp) => (
@@ -918,9 +821,7 @@ const ManagerDashboard = () => {
                 </div>
                 <div className="flex items-end">
                   <button
-                    onClick={() => {
-                      /* TODO: Apply filters */
-                    }}
+                    onClick={fetchAttendanceByDate}
                     className="w-full bg-blue-600 hover:bg-blue-700 text-white font-semibold py-2 px-4 rounded-lg transition"
                   >
                     Apply Filters
@@ -928,7 +829,6 @@ const ManagerDashboard = () => {
                 </div>
               </div>
             </div>
-
             <div className="card">
               <div className="overflow-x-auto">
                 <table className="w-full text-sm">
@@ -942,17 +842,17 @@ const ManagerDashboard = () => {
                     </tr>
                   </thead>
                   <tbody>
-                    {teamAttendance.length === 0 ? (
+                    {filteredAttendance.length === 0 ? (
                       <tr>
                         <td
                           colSpan="5"
                           className="p-3 text-center text-gray-500"
                         >
-                          No attendance records today
+                          No attendance records
                         </td>
                       </tr>
                     ) : (
-                      teamAttendance.map((record) => (
+                      filteredAttendance.map((record) => (
                         <tr
                           key={record.id}
                           className="border-b hover:bg-gray-50"
@@ -973,18 +873,12 @@ const ManagerDashboard = () => {
                               : "-"}
                           </td>
                           <td className="p-3 font-semibold">
-                            {record.duration_hours}h
+                            {record.duration_hours
+                              ? `${Math.floor(record.duration_hours)}hr ${Math.round((record.duration_hours % 1) * 60)}mins`
+                              : "-"}
                           </td>
                           <td className="p-3">
-                            <span
-                              className={`px-2 py-1 rounded text-xs font-semibold ${
-                                record.status === "checked-out"
-                                  ? "bg-green-100 text-green-800"
-                                  : "bg-yellow-100 text-yellow-800"
-                              }`}
-                            >
-                              {record.status}
-                            </span>
+                            <StatusBadge status={record.status} />
                           </td>
                         </tr>
                       ))
@@ -1000,7 +894,6 @@ const ManagerDashboard = () => {
         {activeTab === "reports" && (
           <div className="space-y-6">
             <h2 className="text-2xl font-bold">Reports</h2>
-
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
               <div className="card bg-blue-50 border-l-4 border-blue-500">
                 <h3 className="text-lg font-semibold text-blue-800 mb-2">
@@ -1013,7 +906,6 @@ const ManagerDashboard = () => {
                   Export Attendance Report
                 </button>
               </div>
-
               <div className="card bg-green-50 border-l-4 border-green-500">
                 <h3 className="text-lg font-semibold text-green-800 mb-2">
                   Leave Summary
@@ -1025,7 +917,6 @@ const ManagerDashboard = () => {
                   Export Leave Report
                 </button>
               </div>
-
               <div className="card bg-orange-50 border-l-4 border-orange-500">
                 <h3 className="text-lg font-semibold text-orange-800 mb-2">
                   Overtime & Late Arrivals
@@ -1045,76 +936,44 @@ const ManagerDashboard = () => {
       {/* Tab Navigation */}
       <div className="fixed bottom-0 left-0 right-0 bg-white border-t shadow-lg">
         <div className="max-w-7xl mx-auto flex overflow-x-auto">
-          <button
+          <TabButton
+            active={activeTab === "dashboard"}
             onClick={() => setActiveTab("dashboard")}
-            className={`flex-1 py-3 px-4 text-center font-semibold transition flex items-center justify-center gap-2 ${
-              activeTab === "dashboard"
-                ? "bg-blue-500 text-white"
-                : "bg-gray-100 text-gray-700 hover:bg-gray-200"
-            }`}
-          >
-            <ChartBarIcon className="w-5 h-5" />
-            <span>Dashboard</span>
-          </button>
-          <button
+            icon={ChartBarIcon}
+            label="Dashboard"
+          />
+          <TabButton
+            active={activeTab === "attendance"}
             onClick={() => setActiveTab("attendance")}
-            className={`flex-1 py-3 px-4 text-center font-semibold transition flex items-center justify-center gap-2 ${
-              activeTab === "attendance"
-                ? "bg-blue-500 text-white"
-                : "bg-gray-100 text-gray-700 hover:bg-gray-200"
-            }`}
-          >
-            <CalendarDaysIcon className="w-5 h-5" />
-            <span>Attendance</span>
-          </button>
-          <button
+            icon={CalendarDaysIcon}
+            label="Attendance"
+          />
+          <TabButton
+            active={activeTab === "leave-requests"}
             onClick={() => setActiveTab("leave-requests")}
-            className={`flex-1 py-3 px-4 text-center font-semibold transition flex items-center justify-center gap-2 ${
-              activeTab === "leave-requests"
-                ? "bg-blue-500 text-white"
-                : "bg-gray-100 text-gray-700 hover:bg-gray-200"
-            }`}
-          >
-            <ClipboardDocumentListIcon className="w-5 h-5" />
-            <span>Leave Requests</span>
-          </button>
-          <button
+            icon={ClipboardDocumentListIcon}
+            label="Leave Requests"
+          />
+          <TabButton
+            active={activeTab === "corrections"}
             onClick={() => setActiveTab("corrections")}
-            className={`flex-1 py-3 px-4 text-center font-semibold transition flex items-center justify-center gap-2 ${
-              activeTab === "corrections"
-                ? "bg-blue-500 text-white"
-                : "bg-gray-100 text-gray-700 hover:bg-gray-200"
-            }`}
-          >
-            <ClockIcon className="w-5 h-5" />
-            <span>Corrections</span>
-          </button>
-          <button
+            icon={ClockIcon}
+            label="Corrections"
+          />
+          <TabButton
+            active={activeTab === "employee-directory"}
             onClick={() => setActiveTab("employee-directory")}
-            className={`flex-1 py-3 px-4 text-center font-semibold transition flex items-center justify-center gap-2 ${
-              activeTab === "employee-directory"
-                ? "bg-blue-500 text-white"
-                : "bg-gray-100 text-gray-700 hover:bg-gray-200"
-            }`}
-          >
-            <UserGroupIcon className="w-5 h-5" />
-            <span>Employee Directory</span>
-          </button>
-          <button
+            icon={UserGroupIcon}
+            label="Team"
+          />
+          <TabButton
+            active={activeTab === "reports"}
             onClick={() => setActiveTab("reports")}
-            className={`flex-1 py-3 px-4 text-center font-semibold transition flex items-center justify-center gap-2 ${
-              activeTab === "reports"
-                ? "bg-blue-500 text-white"
-                : "bg-gray-100 text-gray-700 hover:bg-gray-200"
-            }`}
-          >
-            <ChartBarIcon className="w-5 h-5" />
-            <span>Reports</span>
-          </button>
+            icon={ChartBarIcon}
+            label="Reports"
+          />
         </div>
       </div>
-
-      {/* Spacing for bottom navigation */}
       <div className="h-20"></div>
     </div>
   );

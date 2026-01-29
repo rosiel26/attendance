@@ -7,7 +7,6 @@ import {
 } from "react-router-dom";
 import { Toaster } from "react-hot-toast";
 import { useAuth } from "./hooks/useAuth";
-import { useAuthStore } from "./stores/authStore";
 
 import LoginPortal from "./components/Auth/LoginPortal";
 import Login from "./components/Auth/Login";
@@ -19,25 +18,6 @@ import AdminDashboard from "./components/Dashboard/AdminDashboard";
 import CalendarPage from "./components/Calendar/CalendarPage";
 
 import "./styles/index.css";
-
-// Smart redirect based on user role
-const RoleBasedRedirect = () => {
-  const { userProfile } = useAuthStore();
-
-  if (!userProfile) {
-    return <Navigate to="/login" replace />;
-  }
-
-  const role = userProfile.role || "employee";
-
-  if (role === "admin") {
-    return <Navigate to="/admin" replace />;
-  } else if (role === "manager") {
-    return <Navigate to="/manager" replace />;
-  } else {
-    return <Navigate to="/employee" replace />;
-  }
-};
 
 function App() {
   const { loading } = useAuth();

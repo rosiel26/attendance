@@ -171,42 +171,34 @@ export const requestLeave = async (leaveData) => {
 
     if (leaveResult.error) throw leaveResult.error;
 
-    // Get all managers and admins to notify
-    const { data: managers, error: managerError } = await supabase
+    // Get the employee's manager to notify (only their direct manager)
+    const { data: employee, error: empError } = await supabase
       .from('users')
-      .select('id')
-      .in('role', ['manager', 'admin']);
+      .select('id, full_name, manager_id')
+      .eq('id', leaveData.user_id)
+      .single();
 
-    if (managerError) {
-      console.error('Error fetching managers:', managerError);
-      // Don't throw here, the leave request was successful
-    } else if (managers && managers.length > 0) {
-      // Get employee name from users table
-      const { data: employee, error: empError } = await supabase
-        .from('users')
-        .select('full_name')
-        .eq('id', leaveData.user_id)
-        .single();
-  
-      const employeeName = employee?.full_name || 'An employee';
-  
-      // Send notification to each manager (completely optional)
-      if (managers && managers.length > 0) {
-        console.log('Attempting to send notifications to managers:', managers);
-        for (const manager of managers) {
-          const result = await createNotification(
-            manager.id,
-            `${employeeName} has submitted a leave request for approval.`,
-            'leave',
-            leaveResult.data[0].id
-          );
-          if (result) {
-            console.log('Notification sent to manager:', manager.id);
-          } else {
-            console.log('Notification skipped for manager (table not available):', manager.id);
-          }
-        }
-      }
+    if (empError) {
+      console.error('Error fetching employee:', empError);
+    }
+
+    const employeeName = employee?.full_name || 'An employee';
+    const managerId = employee?.manager_id;
+    const startDate = new Date(leaveData.start_date).toLocaleDateString();
+    const endDate = new Date(leaveData.end_date).toLocaleDateString();
+    const leaveType = leaveData.leave_type || 'leave';
+
+    // Send notification only to the employee's direct manager
+    if (managerId) {
+      console.log('Sending notification to manager:', managerId);
+      
+      // Single notification with all details
+      await createNotification(
+        managerId,
+        `${employeeName} has submitted a ${leaveType} leave from ${startDate} to ${endDate} and waiting for approval.`,
+        'leave',
+        leaveResult.data[0].id
+      );
     }
 
     return leaveResult;
@@ -497,6 +489,28 @@ export const createNotification = async (userId, message, type = 'leave', refere
       return null; // Silently fail if notifications table doesn't exist
     }
 
+    // Check for duplicate notification (same user, message, type, referenceId within last 5 seconds)
+    const fiveSecondsAgo = new Date(Date.now() - 5000).toISOString();
+    const { data: existingNotifications, error: dupError } = await supabase
+      .from('notifications')
+      .select('id')
+      .eq('user_id', userId)
+      .eq('message', message)
+      .eq('type', type)
+      .eq('reference_id', referenceId)
+      .gte('created_at', fiveSecondsAgo)
+      .limit(1);
+
+    if (dupError) {
+      console.error('Error checking for duplicates:', dupError);
+    }
+
+    // If a recent identical notification exists, skip creating a duplicate
+    if (existingNotifications && existingNotifications.length > 0) {
+      console.log('Duplicate notification detected, skipping:', message);
+      return null;
+    }
+
     const result = await supabase.from('notifications').insert([
       {
         user_id: userId,
@@ -618,22 +632,7 @@ export const requestAttendanceCorrection = async (correctionData) => {
 
     console.log('Correction request created:', result.data[0]);
 
-    // Notify managers
-    const { data: managers, error: managerError } = await supabase
-      .from('users')
-      .select('id')
-      .in('role', ['manager', 'admin']);
-
-    if (managers && managers.length > 0) {
-      for (const manager of managers) {
-        await createNotification(
-          manager.id,
-          `Attendance correction requested for ${correctionData.attendanceDate} by employee.`,
-          'correction',
-          result.data[0].id
-        );
-      }
-    }
+    // Notification removed as per requirement
 
     return result;
   } catch (error) {
@@ -652,10 +651,14 @@ export const getAttendanceCorrections = async (userId, role) => {
         .eq('user_id', userId)
         .order('created_at', { ascending: false });
     } else if (role === 'manager' || role === 'admin') {
-      // Managers see all corrections with user details
+      // Managers see all corrections with user details and approver details
       return await supabase
         .from('attendance_corrections')
-        .select('*, users!attendance_corrections_user_id_fkey(id, full_name, email)')
+        .select(`
+          *,
+          users!attendance_corrections_user_id_fkey(id, full_name, email),
+          approver:users!attendance_corrections_approved_by_fkey(id, full_name)
+        `)
         .order('created_at', { ascending: false });
     }
     return { data: [], error: null };
@@ -677,7 +680,7 @@ export const approveAttendanceCorrection = async (correctionId, approverUserId, 
     if (fetchError) throw fetchError;
 
     // Update correction
-    const updateResult = await supabase
+    const { data: updateData, error: updateError } = await supabase
       .from('attendance_corrections')
       .update({
         status: 'approved',
@@ -687,9 +690,12 @@ export const approveAttendanceCorrection = async (correctionId, approverUserId, 
         applied: true,
         updated_at: new Date().toISOString(),
       })
-      .eq('id', correctionId);
+      .eq('id', correctionId)
+      .select();
 
-    if (updateResult.error) throw updateResult.error;
+    if (updateError) throw updateError;
+
+    const updateResult = { data: updateData, error: null };
 
     // Find attendance_id if not set
     if (!correction.attendance_id) {
@@ -754,13 +760,6 @@ export const approveAttendanceCorrection = async (correctionId, approverUserId, 
       }
     }
 
-    // Notify employee
-    await createNotification(
-      correction.user_id,
-      'Your attendance correction request has been approved.',
-      'correction',
-      correctionId
-    );
 
     return updateResult;
   } catch (error) {
@@ -781,7 +780,7 @@ export const rejectAttendanceCorrection = async (correctionId, approverUserId, r
     if (fetchError) throw fetchError;
 
     // Update correction
-    const updateResult = await supabase
+    const { data: rejectData, error: rejectError } = await supabase
       .from('attendance_corrections')
       .update({
         status: 'rejected',
@@ -790,9 +789,12 @@ export const rejectAttendanceCorrection = async (correctionId, approverUserId, r
         remarks,
         updated_at: new Date().toISOString(),
       })
-      .eq('id', correctionId);
+      .eq('id', correctionId)
+      .select();
 
-    if (updateResult.error) throw updateResult.error;
+    if (rejectError) throw rejectError;
+
+    const updateResult = { data: rejectData, error: null };
 
     // Update the attendance record to mark as absent
     if (correction.attendance_id) {
@@ -805,13 +807,6 @@ export const rejectAttendanceCorrection = async (correctionId, approverUserId, r
         .eq('id', correction.attendance_id);
     }
 
-    // Notify employee
-    await createNotification(
-      correction.user_id,
-      `Your attendance correction request has been rejected. ${remarks || ''}`,
-      'correction',
-      correctionId
-    );
 
     return updateResult;
   } catch (error) {

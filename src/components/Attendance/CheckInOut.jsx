@@ -1,4 +1,4 @@
-  import React, { useEffect, useState } from "react";
+import React, { useEffect, useState } from "react";
 import { useAuthStore } from "../../stores/authStore";
 import toast from "react-hot-toast";
 import {
@@ -10,6 +10,7 @@ import {
 const CheckInOut = () => {
   const { user } = useAuthStore();
   const [checkedIn, setCheckedIn] = useState(false);
+  const [checkedOutToday, setCheckedOutToday] = useState(false);
   const [checkInTime, setCheckInTime] = useState(null);
   const [currentTime, setCurrentTime] = useState(new Date());
   const [loading, setLoading] = useState(false);
@@ -40,10 +41,12 @@ const CheckInOut = () => {
         // Get the most recent attendance record for today
         const latestRecord = data[0];
         setCheckedIn(latestRecord.status === "checked-in");
+        setCheckedOutToday(latestRecord.status === "checked-out");
         setCheckInTime(latestRecord.check_in_time);
       } else {
         // No attendance record for today
         setCheckedIn(false);
+        setCheckedOutToday(false);
         setCheckInTime(null);
       }
     } catch (error) {
@@ -84,6 +87,7 @@ const CheckInOut = () => {
 
       // Update local state
       setCheckedIn(false);
+      setCheckedOutToday(true);
 
       toast.success("✓ Checked out successfully!");
     } catch (error) {
