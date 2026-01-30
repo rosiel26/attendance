@@ -26,6 +26,30 @@ const CheckInOut = () => {
     }
   }, [user]);
 
+  // Re-fetch when component gains focus (e.g., user returns from another tab)
+  useEffect(() => {
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === "visible" && user?.id) {
+        fetchTodayStatus();
+      }
+    };
+
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    return () =>
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+  }, [user]);
+
+  // Re-fetch status periodically to ensure sync
+  useEffect(() => {
+    const interval = setInterval(() => {
+      if (user?.id && !loading) {
+        fetchTodayStatus();
+      }
+    }, 30000); // Check every 30 seconds
+
+    return () => clearInterval(interval);
+  }, [user, loading]);
+
   const fetchTodayStatus = async () => {
     try {
       if (!user?.id) return;
@@ -63,14 +87,25 @@ const CheckInOut = () => {
         throw error;
       }
 
-      // Update local state
+      // Update local state immediately
       setCheckedIn(true);
       setCheckInTime(new Date().toISOString());
 
       toast.success("✓ Checked in successfully!");
+
+      // Fetch fresh status immediately
+      await fetchTodayStatus();
     } catch (error) {
       console.error("Check-in error:", error);
       toast.error(error.message);
+
+      // If check-in failed because already checked in/out, fetch the current status
+      if (
+        error.message.includes("already checked") ||
+        error.message.includes("Already checked")
+      ) {
+        await fetchTodayStatus();
+      }
     } finally {
       setLoading(false);
     }
@@ -85,23 +120,28 @@ const CheckInOut = () => {
         throw error;
       }
 
-      // Update local state
+      // Update local state immediately
       setCheckedIn(false);
       setCheckedOutToday(true);
 
       toast.success("✓ Checked out successfully!");
+
+      // Fetch fresh status immediately
+      await fetchTodayStatus();
     } catch (error) {
       console.error("Check-out error:", error);
       toast.error(error.message);
+
+      // If check-out failed, fetch the current status to sync
+      await fetchTodayStatus();
     } finally {
       setLoading(false);
     }
   };
 
   return (
-    <div className="card bg-gradient-to-br from-blue-50 to-indigo-100 text-center">
-      <h2 className="text-2xl font-bold mb-6 text-gray-800">Clock In/Out</h2>
-
+    <div className="card  text-center">
+      {/* <h2 className="text-2xl font-bold mb-6 text-gray-800">Clock In/Out</h2> */}
       <div className="mb-8">
         <div className="text-7xl font-bold text-blue-600 font-mono mb-2">
           {currentTime.toLocaleTimeString("en-US", {
@@ -118,7 +158,6 @@ const CheckInOut = () => {
           })}
         </div>
       </div>
-
       {checkInTime && (
         <div className="mb-6 p-4 bg-white rounded-lg">
           <p className="text-gray-700">
@@ -129,7 +168,6 @@ const CheckInOut = () => {
           </p>
         </div>
       )}
-
       <button
         onClick={checkedIn ? handleCheckOut : handleCheckIn}
         disabled={loading}

@@ -75,8 +75,10 @@ const Login = () => {
         <div className="bg-gray-100 rounded-xl sm:rounded-2xl shadow-xl p-6 sm:p-8 w-full max-w-sm md:max-w-md relative z-10 mx-4">
           <div className="text-center mb-6 sm:mb-8">
             <ClockIcon className="w-8 h-8 sm:w-10 sm:h-10 text-blue-600 mx-auto" />
-            <h1 className="text-2xl sm:text-3xl font-bold">WorkPortal</h1>
-            <p className="text-gray-600 text-xs sm:text-sm mt-2">
+            <h1 className="text-2xl sm:text-3xl font-bold text-black">
+              WorkPortal
+            </h1>
+            <p className="text-gray-800 text-xs sm:text-sm mt-2">
               Central Access for All Staff
             </p>
           </div>

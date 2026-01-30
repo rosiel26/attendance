@@ -4,40 +4,73 @@ import { supabase } from '../config/supabase';
 
 export const checkIn = async (userId, geolocation = null) => {
   try {
-    // Check if there's already an attendance record for today
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    const tomorrow = new Date(today);
-    tomorrow.setDate(tomorrow.getDate() + 1);
+    // Use both UTC and local date to handle timezone edge cases
+    const utcDate = new Date().toISOString().split('T')[0];
+    const localDate = new Date().toLocaleString('en-CA');
+    
+    const utcStart = utcDate + 'T00:00:00.000Z';
+    const utcEnd = utcDate + 'T23:59:59.999Z';
+    
+    const localStart = localDate + 'T00:00:00';
+    const localEnd = localDate + 'T23:59:59';
 
-    const { data: existingRecord, error: fetchError } = await supabase
+    // Check if there's already ANY attendance record for today (try UTC first)
+    let { data: existingRecords, error: fetchError } = await supabase
       .from('attendance')
-      .select('status')
+      .select('id, status, check_in_time')
       .eq('user_id', userId)
-      .gte('check_in_time', today.toISOString())
-      .lt('check_in_time', tomorrow.toISOString())
-      .single();
+      .gte('check_in_time', utcStart)
+      .lte('check_in_time', utcEnd);
 
-    if (fetchError && fetchError.code !== 'PGRST116') {
+    // If no results, try local date query
+    if (!existingRecords || existingRecords.length === 0) {
+      const localResult = await supabase
+        .from('attendance')
+        .select('id, status, check_in_time')
+        .eq('user_id', userId)
+        .gte('check_in_time', localStart)
+        .lte('check_in_time', localEnd);
+      
+      if (localResult.error) {
+        fetchError = localResult.error;
+      } else {
+        existingRecords = localResult.data;
+        fetchError = null;
+      }
+    }
+
+    if (fetchError) {
       throw fetchError;
     }
 
-    if (existingRecord) {
-      if (existingRecord.status === 'checked-out') {
+    // If there's already a record for today, don't try to insert again
+    if (existingRecords && existingRecords.length > 0) {
+      const latestRecord = existingRecords[0];
+      if (latestRecord.status === 'checked-out') {
         throw new Error('Already checked out for today. Cannot check in again.');
-      } else if (existingRecord.status === 'checked-in') {
+      } else if (latestRecord.status === 'checked-in') {
         throw new Error('Already checked in today.');
       }
     }
 
-    return await supabase.from('attendance').insert([
+    const { data, error } = await supabase.from('attendance').insert([
       {
         user_id: userId,
         check_in_time: new Date().toISOString(),
         geolocation,
         status: 'checked-in',
       }
-    ]);
+    ]).select();
+
+    if (error) {
+      // Handle unique constraint violation
+      if (error.code === '23505') {
+        throw new Error('You have already checked in today.');
+      }
+      throw error;
+    }
+
+    return { data, error: null };
   } catch (error) {
     console.error('Check-in error:', error);
     throw error;
@@ -94,18 +127,37 @@ export const checkOut = async (userId) => {
 
 export const getTodayAttendance = async (userId) => {
   try {
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    const tomorrow = new Date(today);
-    tomorrow.setDate(tomorrow.getDate() + 1);
+    // Use both UTC and local date to handle timezone edge cases
+    const utcDate = new Date().toISOString().split('T')[0];
+    const localDate = new Date().toLocaleString('en-CA'); // YYYY-MM-DD in local timezone
+    
+    const utcStart = utcDate + 'T00:00:00.000Z';
+    const utcEnd = utcDate + 'T23:59:59.999Z';
+    
+    const localStart = localDate + 'T00:00:00';
+    const localEnd = localDate + 'T23:59:59';
 
-    return await supabase
+    // Try UTC query first
+    let result = await supabase
       .from('attendance')
       .select('*')
       .eq('user_id', userId)
-      .gte('check_in_time', today.toISOString())
-      .lt('check_in_time', tomorrow.toISOString())
+      .gte('check_in_time', utcStart)
+      .lte('check_in_time', utcEnd)
       .order('check_in_time', { ascending: false });
+
+    // If no results, try local date query
+    if (!result.data || result.data.length === 0) {
+      result = await supabase
+        .from('attendance')
+        .select('*')
+        .eq('user_id', userId)
+        .gte('check_in_time', localStart)
+        .lte('check_in_time', localEnd)
+        .order('check_in_time', { ascending: false });
+    }
+
+    return result;
   } catch (error) {
     console.error('Error fetching today attendance:', error);
     throw error;

@@ -1,4 +1,11 @@
-import React, { useState, useEffect, useCallback, useMemo } from "react";
+import React, {
+  useState,
+  useEffect,
+  useCallback,
+  useMemo,
+  lazy,
+  Suspense,
+} from "react";
 import Header from "../Common/Header";
 import { supabase } from "../../config/supabase";
 import { useAuthStore } from "../../stores/authStore";
@@ -15,7 +22,10 @@ import {
   ClipboardDocumentListIcon,
   CalendarDaysIcon,
   ClockIcon,
+  BellIcon,
 } from "@heroicons/react/24/outline";
+
+const Announcements = lazy(() => import("../Leave/Announcements"));
 
 // ============ UI Components ============
 const StatCard = ({ label, value, color, subtext }) => (
@@ -108,7 +118,7 @@ const TabButton = ({ active, onClick, icon: Icon, label }) => (
     className={`flex-1 py-3 px-4 text-center font-semibold transition flex items-center justify-center gap-2 ${
       active
         ? "bg-blue-500 text-white"
-        : "bg-gray-100 text-gray-700 hover:bg-gray-200"
+        : "dark:bg-gray-700 text-white hover:bg-gray-200"
     }`}
   >
     <Icon className="w-5 h-5" />
@@ -426,7 +436,7 @@ const ManagerDashboard = () => {
   }, [teamAttendance, filters.attendanceEmployee]);
 
   return (
-    <div className="flex flex-col min-h-screen bg-gray-100">
+    <div className="flex flex-col min-h-screen">
       <Header
         title="Manager Dashboard"
         onNavigate={(type) =>
@@ -487,7 +497,7 @@ const ManagerDashboard = () => {
             <div className="card">
               <div className="overflow-x-auto">
                 <table className="w-full text-sm">
-                  <thead className="bg-gray-200">
+                  <thead className="dark:bg-gray-700">
                     <tr>
                       <th className="p-3 text-left">Full Name</th>
                       <th className="p-3 text-left">Email</th>
@@ -508,7 +518,10 @@ const ManagerDashboard = () => {
                       </tr>
                     ) : (
                       employees.map((emp) => (
-                        <tr key={emp.id} className="border-b hover:bg-gray-50">
+                        <tr
+                          key={emp.id}
+                          className="border-b dark:hover:bg-gray-700"
+                        >
                           <td className="p-3 font-semibold">{emp.full_name}</td>
                           <td className="p-3">{emp.email}</td>
                           <td className="p-3">
@@ -595,15 +608,29 @@ const ManagerDashboard = () => {
             <div className="card">
               <div className="overflow-x-auto">
                 <table className="w-full text-sm">
-                  <thead className="bg-gray-200">
+                  <thead className="bg-gray-200 dark:bg-gray-700">
                     <tr>
-                      <th className="p-3 text-left">Employee</th>
-                      <th className="p-3 text-left">Leave Type</th>
-                      <th className="p-3 text-left">Start Date</th>
-                      <th className="p-3 text-left">End Date</th>
-                      <th className="p-3 text-left">Reason</th>
-                      <th className="p-3 text-left">Status</th>
-                      <th className="p-3 text-left">Actions</th>
+                      <th className="p-3 text-left text-gray-700 dark:text-gray-200">
+                        Employee
+                      </th>
+                      <th className="p-3 text-left text-gray-700 dark:text-gray-200">
+                        Leave Type
+                      </th>
+                      <th className="p-3 text-left text-gray-700 dark:text-gray-200">
+                        Start Date
+                      </th>
+                      <th className="p-3 text-left text-gray-700 dark:text-gray-200">
+                        End Date
+                      </th>
+                      <th className="p-3 text-left text-gray-700 dark:text-gray-200">
+                        Reason
+                      </th>
+                      <th className="p-3 text-left text-gray-700 dark:text-gray-200">
+                        Status
+                      </th>
+                      <th className="p-3 text-left text-gray-700 dark:text-gray-200">
+                        Actions
+                      </th>
                     </tr>
                   </thead>
                   <tbody>
@@ -611,7 +638,7 @@ const ManagerDashboard = () => {
                       <tr>
                         <td
                           colSpan="7"
-                          className="p-3 text-center text-gray-500"
+                          className="p-3 text-center text-gray-500 dark:text-gray-400"
                         >
                           No leave requests
                         </td>
@@ -620,23 +647,23 @@ const ManagerDashboard = () => {
                       filteredLeaveRequests.map((request) => (
                         <tr
                           key={request.id}
-                          className="border-b hover:bg-gray-50"
+                          className="border-b border-gray-200 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-700"
                         >
-                          <td className="p-3 font-semibold">
+                          <td className="p-3 font-semibold text-gray-900 dark:text-gray-100">
                             {request.users?.full_name}
                           </td>
                           <td className="p-3">
-                            <span className="px-2 py-1 bg-blue-100 text-blue-800 rounded text-xs font-semibold">
+                            <span className="px-2 py-1 bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200 rounded text-xs font-semibold">
                               {request.leave_type}
                             </span>
                           </td>
-                          <td className="p-3">
+                          <td className="p-3 text-gray-700 dark:text-gray-200">
                             {new Date(request.start_date).toLocaleDateString()}
                           </td>
-                          <td className="p-3">
+                          <td className="p-3 text-gray-700 dark:text-gray-200">
                             {new Date(request.end_date).toLocaleDateString()}
                           </td>
-                          <td className="p-3 text-gray-600 max-w-xs truncate">
+                          <td className="p-3 text-gray-600 dark:text-gray-300 max-w-xs truncate">
                             {request.reason || "-"}
                           </td>
                           <td className="p-3">
@@ -693,15 +720,29 @@ const ManagerDashboard = () => {
             <div className="card">
               <div className="overflow-x-auto">
                 <table className="w-full text-sm">
-                  <thead className="bg-gray-200">
+                  <thead className="bg-gray-200 dark:bg-gray-700">
                     <tr>
-                      <th className="p-3 text-left">Employee</th>
-                      <th className="p-3 text-left">Date</th>
-                      <th className="p-3 text-left">Missing Type</th>
-                      <th className="p-3 text-left">Time</th>
-                      <th className="p-3 text-left">Reason</th>
-                      <th className="p-3 text-left">Status</th>
-                      <th className="p-3 text-left">Actions</th>
+                      <th className="p-3 text-left text-gray-700 dark:text-gray-200">
+                        Employee
+                      </th>
+                      <th className="p-3 text-left text-gray-700 dark:text-gray-200">
+                        Date
+                      </th>
+                      <th className="p-3 text-left text-gray-700 dark:text-gray-200">
+                        Missing Type
+                      </th>
+                      <th className="p-3 text-left text-gray-700 dark:text-gray-200">
+                        Time
+                      </th>
+                      <th className="p-3 text-left text-gray-700 dark:text-gray-200">
+                        Reason
+                      </th>
+                      <th className="p-3 text-left text-gray-700 dark:text-gray-200">
+                        Status
+                      </th>
+                      <th className="p-3 text-left text-gray-700 dark:text-gray-200">
+                        Actions
+                      </th>
                     </tr>
                   </thead>
                   <tbody>
@@ -709,7 +750,7 @@ const ManagerDashboard = () => {
                       <tr>
                         <td
                           colSpan="7"
-                          className="p-3 text-center text-gray-500"
+                          className="p-3 text-center text-gray-500 dark:text-gray-400"
                         >
                           No correction requests
                         </td>
@@ -718,25 +759,27 @@ const ManagerDashboard = () => {
                       corrections.map((correction) => (
                         <tr
                           key={correction.id}
-                          className="border-b hover:bg-gray-50"
+                          className="border-b border-gray-200 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-700"
                         >
-                          <td className="p-3 font-semibold">
+                          <td className="p-3 font-semibold text-gray-900 dark:text-gray-100">
                             {correction.users?.full_name}
                           </td>
-                          <td className="p-3">
+                          <td className="p-3 text-gray-700 dark:text-gray-200">
                             {new Date(
                               correction.attendance_date,
                             ).toLocaleDateString()}
                           </td>
                           <td className="p-3">
-                            <span className="px-2 py-1 bg-blue-100 text-blue-800 rounded text-xs font-semibold">
+                            <span className="px-2 py-1 bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200 rounded text-xs font-semibold">
                               {correction.missing_type === "check_out"
                                 ? "Check-out"
                                 : correction.missing_type}
                             </span>
                           </td>
-                          <td className="p-3">{correction.requested_time}</td>
-                          <td className="p-3 text-gray-600 max-w-xs truncate">
+                          <td className="p-3 text-gray-700 dark:text-gray-200">
+                            {correction.requested_time}
+                          </td>
+                          <td className="p-3 text-gray-600 dark:text-gray-300 max-w-xs truncate">
                             {correction.reason || "-"}
                           </td>
                           <td className="p-3">
@@ -773,6 +816,19 @@ const ManagerDashboard = () => {
               </div>
             </div>
           </div>
+        )}
+
+        {/* Announcements Tab */}
+        {activeTab === "announcements" && (
+          <Suspense
+            fallback={
+              <div className="flex justify-center p-8">
+                <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600" />
+              </div>
+            }
+          >
+            <Announcements />
+          </Suspense>
         )}
 
         {/* Attendance Tab */}
@@ -832,13 +888,23 @@ const ManagerDashboard = () => {
             <div className="card">
               <div className="overflow-x-auto">
                 <table className="w-full text-sm">
-                  <thead className="bg-gray-200">
+                  <thead className="bg-gray-200 dark:bg-gray-700">
                     <tr>
-                      <th className="p-3 text-left">Employee</th>
-                      <th className="p-3 text-left">Check-in</th>
-                      <th className="p-3 text-left">Check-out</th>
-                      <th className="p-3 text-left">Hours Worked</th>
-                      <th className="p-3 text-left">Status</th>
+                      <th className="p-3 text-left text-gray-700 dark:text-gray-200">
+                        Employee
+                      </th>
+                      <th className="p-3 text-left text-gray-700 dark:text-gray-200">
+                        Check-in
+                      </th>
+                      <th className="p-3 text-left text-gray-700 dark:text-gray-200">
+                        Check-out
+                      </th>
+                      <th className="p-3 text-left text-gray-700 dark:text-gray-200">
+                        Hours Worked
+                      </th>
+                      <th className="p-3 text-left text-gray-700 dark:text-gray-200">
+                        Status
+                      </th>
                     </tr>
                   </thead>
                   <tbody>
@@ -846,7 +912,7 @@ const ManagerDashboard = () => {
                       <tr>
                         <td
                           colSpan="5"
-                          className="p-3 text-center text-gray-500"
+                          className="p-3 text-center text-gray-500 dark:text-gray-400"
                         >
                           No attendance records
                         </td>
@@ -855,24 +921,24 @@ const ManagerDashboard = () => {
                       filteredAttendance.map((record) => (
                         <tr
                           key={record.id}
-                          className="border-b hover:bg-gray-50"
+                          className="border-b border-gray-200 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-700"
                         >
-                          <td className="p-3 font-semibold">
+                          <td className="p-3 font-semibold text-gray-900 dark:text-gray-100">
                             {record.users?.full_name}
                           </td>
-                          <td className="p-3">
+                          <td className="p-3 text-gray-700 dark:text-gray-200">
                             {new Date(
                               record.check_in_time,
                             ).toLocaleTimeString()}
                           </td>
-                          <td className="p-3">
+                          <td className="p-3 text-gray-700 dark:text-gray-200">
                             {record.check_out_time
                               ? new Date(
                                   record.check_out_time,
                                 ).toLocaleTimeString()
                               : "-"}
                           </td>
-                          <td className="p-3 font-semibold">
+                          <td className="p-3 font-semibold text-gray-900 dark:text-gray-100">
                             {record.duration_hours
                               ? `${Math.floor(record.duration_hours)}hr ${Math.round((record.duration_hours % 1) * 60)}mins`
                               : "-"}
@@ -953,6 +1019,12 @@ const ManagerDashboard = () => {
             onClick={() => setActiveTab("leave-requests")}
             icon={ClipboardDocumentListIcon}
             label="Leave Requests"
+          />
+          <TabButton
+            active={activeTab === "announcements"}
+            onClick={() => setActiveTab("announcements")}
+            icon={BellIcon}
+            label="Announcements"
           />
           <TabButton
             active={activeTab === "corrections"}

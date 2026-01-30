@@ -256,10 +256,10 @@ const AttendanceCalendar = () => {
       }
       const checkInFormatted = formatTime(correctedCheckInTime);
       const checkOutFormatted = formatTime(correctedCheckOutTime);
-      const hoursWorked = calculateHoursWorked(
-        correctedCheckInTime,
-        correctedCheckOutTime,
-      );
+      const hoursWorked = attendance.duration_hours ? {
+        hours: Math.floor(attendance.duration_hours),
+        minutes: Math.round((attendance.duration_hours - Math.floor(attendance.duration_hours)) * 60)
+      } : null;
       const isIncomplete = correctedCheckInTime && !correctedCheckOutTime;
 
       content = (
@@ -353,22 +353,6 @@ const AttendanceCalendar = () => {
     setCurrentMonth(newMonth);
   };
 
-  const calculateHoursWorked = (checkInTime, checkOutTime) => {
-    if (!checkInTime || !checkOutTime) return null;
-
-    const checkIn = new Date(checkInTime);
-    const checkOut = new Date(checkOutTime);
-    const diffMs = checkOut - checkIn;
-
-    if (diffMs <= 0) return null;
-
-    // Round to nearest minute for better user experience
-    const totalMinutes = Math.round(diffMs / (1000 * 60));
-    const hours = Math.floor(totalMinutes / 60);
-    const minutes = totalMinutes % 60;
-
-    return { hours, minutes };
-  };
 
   const formatTime = (dateTime) => {
     if (!dateTime) return "";

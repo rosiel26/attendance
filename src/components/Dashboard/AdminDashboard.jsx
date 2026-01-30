@@ -1,4 +1,11 @@
-import React, { useState, useEffect, useCallback, useMemo } from "react";
+import React, {
+  useState,
+  useEffect,
+  useCallback,
+  useMemo,
+  lazy,
+  Suspense,
+} from "react";
 import Header from "../Common/Header";
 import { supabase } from "../../config/supabase";
 import toast from "react-hot-toast";
@@ -16,7 +23,10 @@ import {
   EyeSlashIcon,
   XCircleIcon,
   PencilIcon,
+  BellIcon,
 } from "@heroicons/react/24/outline";
+
+const Announcements = lazy(() => import("../Leave/Announcements"));
 
 // ============ UI Components ============
 const StatCard = ({ label, value, icon: Icon, color }) => (
@@ -156,6 +166,8 @@ const AdminDashboard = () => {
     date: "",
     is_recurring: false,
   });
+  const [userFilter, setUserFilter] = useState("all");
+  const [userSearch, setUserSearch] = useState("");
 
   // Tab data fetching
   useEffect(() => {
@@ -328,22 +340,20 @@ const AdminDashboard = () => {
           throw new Error(authError?.message || "User creation failed");
 
         try {
-          await supabase
-            .from("users")
-            .upsert(
-              [
-                {
-                  id: authData.user.id,
-                  email: formData.email,
-                  full_name: formData.full_name,
-                  role: formData.role,
-                  organization_id: organizationId,
-                  department_id: formData.department_id || null,
-                  manager_id: formData.manager_id || null,
-                },
-              ],
-              { onConflict: "id" },
-            );
+          await supabase.from("users").upsert(
+            [
+              {
+                id: authData.user.id,
+                email: formData.email,
+                full_name: formData.full_name,
+                role: formData.role,
+                organization_id: organizationId,
+                department_id: formData.department_id || null,
+                manager_id: formData.manager_id || null,
+              },
+            ],
+            { onConflict: "id" },
+          );
         } catch (dbError) {
           console.log(
             "Note: User record sync blocked by RLS, but auth user was created",
@@ -432,15 +442,13 @@ const AdminDashboard = () => {
         .select("id")
         .limit(1)
         .single();
-      const { error } = await supabase
-        .from("departments")
-        .insert([
-          {
-            name: deptData.name,
-            manager_id: deptData.manager_id || null,
-            organization_id: orgData?.id || null,
-          },
-        ]);
+      const { error } = await supabase.from("departments").insert([
+        {
+          name: deptData.name,
+          manager_id: deptData.manager_id || null,
+          organization_id: orgData?.id || null,
+        },
+      ]);
       if (error) throw error;
       toast.success("Department added successfully");
       setDeptData({ name: "", manager_id: "" });
@@ -479,15 +487,13 @@ const AdminDashboard = () => {
       return toast.error("Holiday name and date required");
     try {
       setLoading(true);
-      const { error } = await supabase
-        .from("holidays")
-        .insert([
-          {
-            name: holidayData.name,
-            date: holidayData.date,
-            is_recurring: holidayData.is_recurring,
-          },
-        ]);
+      const { error } = await supabase.from("holidays").insert([
+        {
+          name: holidayData.name,
+          date: holidayData.date,
+          is_recurring: holidayData.is_recurring,
+        },
+      ]);
       if (error) throw error;
       toast.success("Holiday added");
       setHolidayData({ name: "", date: "", is_recurring: false });
@@ -549,7 +555,7 @@ const AdminDashboard = () => {
   );
 
   return (
-    <div className="flex flex-col min-h-screen bg-gray-100">
+    <div className="flex flex-col min-h-screen">
       <Header title="Admin Dashboard" />
       <main className="flex-1 p-4 md:p-8 pb-24">
         {/* Overview Tab */}
@@ -746,68 +752,148 @@ const AdminDashboard = () => {
               </Card>
             )}
 
+            {/* Filter Buttons */}
+            <div className="flex gap-2 mb-4">
+              <button
+                onClick={() => setUserFilter("all")}
+                className={`px-4 py-2 rounded-lg text-sm font-medium transition ${
+                  userFilter === "all"
+                    ? "bg-blue-600 text-white"
+                    : "bg-gray-200 text-gray-700 hover:bg-gray-300"
+                }`}
+              >
+                All
+              </button>
+              <button
+                onClick={() => setUserFilter("employee")}
+                className={`px-4 py-2 rounded-lg text-sm font-medium transition ${
+                  userFilter === "employee"
+                    ? "bg-blue-600 text-white"
+                    : "bg-gray-200 text-gray-700 hover:bg-gray-300"
+                }`}
+              >
+                Employees
+              </button>
+              <button
+                onClick={() => setUserFilter("manager")}
+                className={`px-4 py-2 rounded-lg text-sm font-medium transition ${
+                  userFilter === "manager"
+                    ? "bg-blue-600 text-white"
+                    : "bg-gray-200 text-gray-700 hover:bg-gray-300"
+                }`}
+              >
+                Managers
+              </button>
+            </div>
+
+            {/* Search Bar */}
+            <div className="mb-4">
+              <input
+                type="text"
+                placeholder="Search by name or email..."
+                value={userSearch}
+                onChange={(e) => setUserSearch(e.target.value)}
+                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:border-blue-500"
+              />
+            </div>
+
             <Card>
               <div className="overflow-x-auto">
                 <table className="w-full text-sm">
-                  <thead className="bg-gray-200">
+                  <thead className="bg-gray-200 dark:bg-gray-700">
                     <tr>
-                      <th className="p-3 text-left">Email</th>
-                      <th className="p-3 text-left">Name</th>
-                      <th className="p-3 text-left">Role</th>
-                      <th className="p-3 text-left">Department</th>
-                      <th className="p-3 text-left">Manager</th>
-                      <th className="p-3 text-left">Actions</th>
+                      <th className="p-3 text-left text-gray-700 dark:text-gray-200">
+                        Email
+                      </th>
+                      <th className="p-3 text-left text-gray-700 dark:text-gray-200">
+                        Name
+                      </th>
+                      <th className="p-3 text-left text-gray-700 dark:text-gray-200">
+                        Role
+                      </th>
+                      <th className="p-3 text-left text-gray-700 dark:text-gray-200">
+                        Department
+                      </th>
+                      <th className="p-3 text-left text-gray-700 dark:text-gray-200">
+                        Manager
+                      </th>
+                      <th className="p-3 text-left text-gray-700 dark:text-gray-200">
+                        Actions
+                      </th>
                     </tr>
                   </thead>
                   <tbody>
-                    {users.map((user) => (
-                      <tr key={user.id} className="border-b hover:bg-gray-50">
-                        <td className="p-3">{user.email}</td>
-                        <td className="p-3">{user.full_name}</td>
-                        <td className="p-3">
-                          <select
-                            value={user.role}
-                            onChange={(e) =>
-                              handleUpdateUserRole(user.id, e.target.value)
-                            }
-                            className="p-1 border rounded text-xs"
-                          >
-                            <option value="employee">Employee</option>
-                            <option value="manager">Manager</option>
-                            <option value="admin">Admin</option>
-                          </select>
-                        </td>
-                        <td className="p-3">{user.department?.name || "-"}</td>
-                        <td className="p-3">
-                          {getManagerName(user.manager_id)}
-                        </td>
-                        <td className="p-3 flex gap-2">
-                          <ActionButton
-                            onClick={() => {
-                              setEditingUser(user);
-                              setFormData({
-                                email: user.email,
-                                full_name: user.full_name,
-                                password: "",
-                                confirmPassword: "",
-                                role: user.role,
-                                department_id: user.department_id || "",
-                                manager_id: user.manager_id || "",
-                              });
-                              setShowAddUser(true);
-                            }}
-                            icon={PencilIcon}
-                            title="Edit Employee"
-                          />
-                          <ActionButton
-                            onClick={() => handleDeleteUser(user.id)}
-                            icon={TrashIcon}
-                            color="red"
-                            title="Delete Employee"
-                          />
-                        </td>
-                      </tr>
-                    ))}
+                    {users
+                      .filter(
+                        (u) => userFilter === "all" || u.role === userFilter,
+                      )
+                      .filter(
+                        (u) =>
+                          !userSearch ||
+                          u.full_name
+                            ?.toLowerCase()
+                            .includes(userSearch.toLowerCase()) ||
+                          u.email
+                            ?.toLowerCase()
+                            .includes(userSearch.toLowerCase()),
+                      )
+                      .map((user) => (
+                        <tr
+                          key={user.id}
+                          className="border-b border-gray-200 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-700"
+                        >
+                          <td className="p-3 text-gray-700 dark:text-gray-200">
+                            {user.email}
+                          </td>
+                          <td className="p-3 font-medium text-gray-900 dark:text-gray-100">
+                            {user.full_name}
+                          </td>
+                          <td className="p-3">
+                            <select
+                              value={user.role}
+                              onChange={(e) =>
+                                handleUpdateUserRole(user.id, e.target.value)
+                              }
+                              className="p-1 border rounded text-xs"
+                            >
+                              <option value="employee">Employee</option>
+                              <option value="manager">Manager</option>
+                              <option value="admin">Admin</option>
+                            </select>
+                          </td>
+                          <td className="p-3">
+                            {user.department?.name || "-"}
+                          </td>
+                          <td className="p-3">
+                            {getManagerName(user.manager_id)}
+                          </td>
+                          <td className="p-3 flex gap-2">
+                            <ActionButton
+                              onClick={() => {
+                                setEditingUser(user);
+                                setFormData({
+                                  email: user.email,
+                                  full_name: user.full_name,
+                                  password: "",
+                                  confirmPassword: "",
+                                  role: user.role,
+                                  department_id: user.department_id || "",
+                                  manager_id: user.manager_id || "",
+                                });
+                                setShowAddUser(true);
+                              }}
+                              icon={PencilIcon}
+                              title="Edit Employee"
+                            />
+                            <ActionButton
+                              onClick={() => handleDeleteUser(user.id)}
+                              icon={TrashIcon}
+                              color="red"
+                              title="Delete Employee"
+                            />
+                          </td>
+                        </tr>
+                      ))}
                   </tbody>
                 </table>
               </div>
@@ -977,6 +1063,19 @@ const AdminDashboard = () => {
           </div>
         )}
 
+        {/* Announcements Tab */}
+        {activeTab === "announcements" && (
+          <Suspense
+            fallback={
+              <div className="flex justify-center p-8">
+                <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600" />
+              </div>
+            }
+          >
+            <Announcements />
+          </Suspense>
+        )}
+
         {/* Attendance Reports Tab */}
         {activeTab === "attendance" && (
           <div className="space-y-4">
@@ -1049,6 +1148,12 @@ const AdminDashboard = () => {
             onClick={() => setActiveTab("holidays")}
             icon={CalendarDaysIcon}
             label="Holidays"
+          />
+          <TabButton
+            active={activeTab === "announcements"}
+            onClick={() => setActiveTab("announcements")}
+            icon={BellIcon}
+            label="Announcements"
           />
           <TabButton
             active={activeTab === "attendance"}

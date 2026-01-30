@@ -89,7 +89,7 @@ const AttendanceCorrection = () => {
       </h2>
       <form onSubmit={handleSubmit} className="space-y-4">
         <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1">
+          <label className="block text-sm font-medium text-black mb-1">
             Date
           </label>
           <input
@@ -101,7 +101,7 @@ const AttendanceCorrection = () => {
           />
         </div>
         <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1">
+          <label className="block text-sm font-medium text-black mb-1">
             Correction Type
           </label>
           <select
@@ -114,7 +114,7 @@ const AttendanceCorrection = () => {
           </select>
         </div>
         <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1">
+          <label className="block text-sm font-medium text-black mb-1">
             Requested Time
           </label>
           <input
@@ -126,7 +126,7 @@ const AttendanceCorrection = () => {
           />
         </div>
         <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1">
+          <label className="block text-sm font-medium text-black mb-1">
             Reason
           </label>
           <textarea

@@ -30,7 +30,7 @@ body {
 }
 
 .card {
-  @apply bg-white rounded-lg shadow-md p-6;
+  @apply bg-white/90 backdrop-blur-sm rounded-lg shadow-md p-6;
 }
 
 .input-field {

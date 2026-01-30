@@ -150,10 +150,9 @@ const Notifications = ({ onNavigate }) => {
     // Navigate based on notification type
     if (onNavigate) {
       if (notification.type === "leave") {
-        // For managers: go to leave requests
-        // For employees: go to leave history
-        // We'll determine this in the parent component
         onNavigate(notification.type, notification);
+      } else if (notification.type === "announcement") {
+        onNavigate("announcement", notification);
       }
     }
 
@@ -186,6 +185,8 @@ const Notifications = ({ onNavigate }) => {
         return "⏰";
       case "correction":
         return "🔧";
+      case "announcement":
+        return "📢";
       case "system":
         return "⚙️";
       default:
@@ -201,6 +202,8 @@ const Notifications = ({ onNavigate }) => {
         return "Attendance";
       case "correction":
         return "Correction Request";
+      case "announcement":
+        return "Announcement";
       case "system":
         return "System";
       default:

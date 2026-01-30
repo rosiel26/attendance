@@ -7,6 +7,7 @@ import {
 } from "react-router-dom";
 import { Toaster } from "react-hot-toast";
 import { useAuth } from "./hooks/useAuth";
+import { BackgroundThemeProvider } from "./components/Common/Settings";
 
 import LoginPortal from "./components/Auth/LoginPortal";
 import Login from "./components/Auth/Login";
@@ -31,7 +32,7 @@ function App() {
   }
 
   return (
-    <>
+    <BackgroundThemeProvider>
       <Toaster position="top-right" />
       <Router>
         <Routes>
@@ -74,7 +75,7 @@ function App() {
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </Router>
-    </>
+    </BackgroundThemeProvider>
   );
 }
 
