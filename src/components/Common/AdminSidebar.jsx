@@ -101,7 +101,7 @@ const AdminSidebar = ({ activeTab, setActiveTab, onLogout, currentTheme, onChang
         <div className="p-4 border-b border-white/20">
           <div className="flex items-center gap-3">
             <img
-              src="/src/assets/rlb-logo.jpg"
+              src="/rlb-logo.jpg"
               alt="RLB Logo"
               className="w-10 h-10 rounded-lg object-cover"
             />

@@ -50,7 +50,7 @@ const Login = () => {
             <div className="relative flex-shrink-0">
               <div className="absolute inset-0 bg-blue-600 rounded-lg blur-sm opacity-20"></div>
               <img
-                src="/src/assets/rlb-logo.jpg"
+                src="/rlb-logo.jpg"
                 alt="RLB Logo"
                 className="relative h-12 w-auto sm:h-16 md:h-18 object-contain"
               />

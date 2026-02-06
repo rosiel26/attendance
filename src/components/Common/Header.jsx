@@ -34,7 +34,7 @@ const Header = ({
           <div className="flex items-center gap-3 -ml-2 ">
             <div className="flex items-center gap-3 px-6 py-2">
               <img
-                src="/src/assets/rlb-logo.jpg"
+                src="/rlb-logo.jpg"
                 alt="AttendanceHub Logo"
                 className="h-12 w-auto sm:h-16 md:h-20"
               />
