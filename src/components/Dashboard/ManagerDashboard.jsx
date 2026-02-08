@@ -185,7 +185,7 @@ const ManagerDashboard = () => {
       header: "Hours",
       render: (row) => (
         <span className="text-gray-700 dark:text-gray-200">
-          {row.hours_worked ? `${row.hours_worked.toFixed(2)}h` : "-"}
+          {row.duration_hours ? `${parseFloat(row.duration_hours).toFixed(2)}h` : "-"}
         </span>
       ),
     },

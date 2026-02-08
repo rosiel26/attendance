@@ -86,11 +86,11 @@ export const useManagerData = (user, userProfile) => {
     setLoading(true);
     try {
       const workStartHour = 9; // 9 AM
-      
+
       const { data: attendanceData } = await supabase.from("attendance").select("*, users:user_id(id, full_name, email)").in("user_id", teamIds).gte("check_in_time", startDate).lte("check_in_time", endDate);
 
       const hoursByEmployee = {};
-      
+
       // Get dates with attendance for each employee
       const employeeDates = {};
       (attendanceData || []).forEach((record) => {
@@ -107,20 +107,20 @@ export const useManagerData = (user, userProfile) => {
       (attendanceData || []).forEach((record) => {
         const userId = record.user_id;
         if (!hoursByEmployee[userId]) {
-          hoursByEmployee[userId] = { 
-            userId, 
-            fullName: record.users?.full_name || "Unknown", 
-            email: record.users?.email, 
-            totalHours: 0, 
+          hoursByEmployee[userId] = {
+            userId,
+            fullName: record.users?.full_name || "Unknown",
+            email: record.users?.email,
+            totalHours: 0,
             daysPresent: 0,
             daysLate: 0,
-            daysAbsent: 0 
+            daysAbsent: 0
           };
         }
         if (record.check_in_time) {
           hoursByEmployee[userId].totalHours += record.duration_hours || 0;
           hoursByEmployee[userId].daysPresent += 1;
-          
+
           // Check if late (after 9 AM)
           const checkInTime = new Date(record.check_in_time);
           const hours = checkInTime.getHours() + checkInTime.getMinutes() / 60;
@@ -133,7 +133,7 @@ export const useManagerData = (user, userProfile) => {
       // Calculate absent days for each employee based on their actual attendance dates
       const monthlyHoursData = Object.values(hoursByEmployee).map((emp) => {
         const presentDates = employeeDates[emp.userId] || new Set();
-        
+
         // Count weekdays between start and end date
         const start = new Date(startDate);
         const end = new Date(endDate);
@@ -144,7 +144,7 @@ export const useManagerData = (user, userProfile) => {
             weekdaysInRange += 1;
           }
         }
-        
+
         return {
           ...emp,
           totalHours: parseFloat(emp.totalHours.toFixed(2)),
@@ -153,10 +153,10 @@ export const useManagerData = (user, userProfile) => {
       }).sort((a, b) => b.totalHours - a.totalHours);
 
       // Filter by employee name if search is provided
-      const filteredData = employeeSearch 
-        ? monthlyHoursData.filter(emp => 
-            emp.fullName?.toLowerCase().includes(employeeSearch.toLowerCase())
-          )
+      const filteredData = employeeSearch
+        ? monthlyHoursData.filter(emp =>
+          emp.fullName?.toLowerCase().includes(employeeSearch.toLowerCase())
+        )
         : monthlyHoursData;
 
       setMonthlyHours(monthlyHoursData);
