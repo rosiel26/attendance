@@ -1,10 +1,11 @@
 import { createClient } from '@supabase/supabase-js';
 
-const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL || 'https://gecidqdnnezymamgkcjv.supabase.co';
-const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImdlY2lkcWRubmV6eW1hbWdrY2p2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njg5NjI0MjQsImV4cCI6MjA4NDUzODQyNH0.rh7sQb27DEoMJsQRy9ki5DO8zlb87HABwuZYQ9s9n9g';
+const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL;
+const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY;
 
-if (!SUPABASE_ANON_KEY) {
-  console.warn('Warning: Supabase anon key is not set. Please configure .env.local');
+if (!SUPABASE_URL || !SUPABASE_ANON_KEY) {
+  console.error('Error: Supabase environment variables are not set.');
+  console.error('Please configure VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY in your .env.local file or Vercel Environment Variables.');
 }
 
 export const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
